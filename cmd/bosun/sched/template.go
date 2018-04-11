@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -687,4 +688,11 @@ func (c *Context) ESQueryAll(indexRoot expr.ESIndexer, filter expr.ESQuery, sdur
 		}
 	}
 	return r
+}
+
+// temp patch for json encoding
+func (c *Context) RemoveQuotes(s string) string {
+	re := regexp.MustCompile(`\"`)
+	sub := ``
+	return re.ReplaceAllString(s, sub)
 }
