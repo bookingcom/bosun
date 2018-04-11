@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"bosun.org/slog"
@@ -51,6 +52,13 @@ func (a ActionNotificationContext) IncidentLink(i int64) string {
 	return a.makeLink("/incident", &url.Values{
 		"id": []string{fmt.Sprint(i)},
 	})
+}
+
+// temp patch for json encoding
+func (c ActionNotificationContext) RemoveQuotes(s string) string {
+	re := regexp.MustCompile(`\"`)
+	sub := ``
+	return re.ReplaceAllString(s, sub)
 }
 
 // NotifyAction should be used for action notifications.
