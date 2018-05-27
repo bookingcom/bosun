@@ -1,7 +1,7 @@
 /// <reference path="moment.d.ts" />
 /// <reference path="moment-duration-format.d.ts" />
 //Represents an auth token
-var Token = (function () {
+var Token = /** @class */ (function () {
     function Token() {
         this.Description = "";
         this.Role = 0;
@@ -10,19 +10,19 @@ var Token = (function () {
     return Token;
 }());
 //metadata about a single role or permission
-var BitMeta = (function () {
+var BitMeta = /** @class */ (function () {
     function BitMeta() {
     }
     return BitMeta;
 }());
 //all roles/permissions for bosun
-var RoleDefs = (function () {
+var RoleDefs = /** @class */ (function () {
     function RoleDefs() {
     }
     return RoleDefs;
 }());
 // See models/incident.go Event (can't be event here because JS uses that)
-var IncidentEvent = (function () {
+var IncidentEvent = /** @class */ (function () {
     function IncidentEvent(ie) {
         this.Value = ie.Value;
         this.Expr = ie.Expr;
@@ -32,7 +32,7 @@ var IncidentEvent = (function () {
     }
     return IncidentEvent;
 }());
-var Annotation = (function () {
+var Annotation = /** @class */ (function () {
     function Annotation(a, get) {
         a = a || {};
         this.Id = a.Id || "";
@@ -58,14 +58,14 @@ var Annotation = (function () {
     };
     return Annotation;
 }());
-var Result = (function () {
+var Result = /** @class */ (function () {
     function Result(r) {
         this.Value = r.Value;
         this.Expr = r.Expr;
     }
     return Result;
 }());
-var Action = (function () {
+var Action = /** @class */ (function () {
     function Action(a) {
         this.User = a.User;
         this.Message = a.Message;
@@ -78,7 +78,7 @@ var Action = (function () {
     return Action;
 }());
 // See models/incident.go
-var IncidentState = (function () {
+var IncidentState = /** @class */ (function () {
     function IncidentState(is) {
         this.Id = is.Id;
         this.Start = is.Start;
@@ -121,7 +121,7 @@ var IncidentState = (function () {
     };
     return IncidentState;
 }());
-var StateGroup = (function () {
+var StateGroup = /** @class */ (function () {
     function StateGroup(sg) {
         this.Active = sg.Active;
         this.Status = sg.Status;
@@ -145,7 +145,7 @@ var StateGroup = (function () {
     }
     return StateGroup;
 }());
-var Groups = (function () {
+var Groups = /** @class */ (function () {
     function Groups(g) {
         this.NeedAck = new Array();
         if (g.NeedAck) {
@@ -164,7 +164,7 @@ var Groups = (function () {
     }
     return Groups;
 }());
-var StateGroups = (function () {
+var StateGroups = /** @class */ (function () {
     function StateGroups(sgs) {
         this.Groups = new Groups(sgs.Groups);
         this.TimeAndDate = sgs.TimeAndDate;
@@ -311,6 +311,7 @@ bosunControllers.controller('BosunCtrl', ['$scope', '$route', '$http', '$q', '$r
             $scope.quiet = settings.Quiet;
             $scope.version = settings.Version;
             $scope.opentsdbEnabled = $scope.version.Major != 0 && $scope.version.Minor != 0;
+            $scope.exampleExpression = settings.ExampleExpression;
             $scope.tokensEnabled = settings.TokensEnabled;
             $scope.auth = AuthService;
             AuthService.Init(settings.AuthEnabled, settings.Username, settings.Roles, settings.Permissions);
@@ -572,61 +573,70 @@ var timeFormat = 'YYYY-MM-DDTHH:mm:ssZ';
 /// <reference path="0-bosun.ts" />
 bosunControllers.controller('ExprCtrl', ['$scope', '$http', '$location', '$route', function ($scope, $http, $location, $route) {
         var search = $location.search();
-        var current;
+        var current = '';
         try {
             current = atob(search.expr);
         }
         catch (e) {
             current = '';
         }
-        if (!current) {
-            $location.search('expr', btoa('avg(q("avg:rate:os.cpu{host=*bosun*}", "5m", "")) > 80'));
+        if (!current && $scope.exampleExpression) {
+            $location.search('expr', btoa($scope.exampleExpression));
             return;
         }
         $scope.date = search.date || '';
         $scope.time = search.time || '';
         $scope.expr = current;
-        $scope.running = current;
         $scope.tab = search.tab || 'results';
         $scope.animate();
-        $http.post('/api/expr?' +
-            'date=' + encodeURIComponent($scope.date) +
-            '&time=' + encodeURIComponent($scope.time), current)
-            .success(function (data) {
-            $scope.result = data.Results;
-            $scope.queries = data.Queries;
-            $scope.result_type = data.Type;
-            if (data.Type == 'series') {
-                $scope.svg_url = '/api/egraph/' + btoa(current) + '.svg?now=' + Math.floor(Date.now() / 1000);
-                $scope.graph = toChart(data.Results);
-            }
-            if (data.Type == 'number') {
-                angular.forEach(data.Results, function (d) {
-                    var name = '{';
-                    angular.forEach(d.Group, function (tagv, tagk) {
-                        if (name.length > 1) {
-                            name += ',';
-                        }
-                        name += tagk + '=' + tagv;
+        if ($scope.expr) {
+            $scope.running = $scope.expr;
+            $http.post('/api/expr?' +
+                'date=' + encodeURIComponent($scope.date) +
+                '&time=' + encodeURIComponent($scope.time), current)
+                .success(function (data) {
+                $scope.result = data.Results;
+                $scope.queries = data.Queries;
+                $scope.result_type = data.Type;
+                if (data.Type == 'series') {
+                    $scope.svg_url = '/api/egraph/' + btoa(current) + '.svg?now=' + Math.floor(Date.now() / 1000);
+                    $scope.graph = toChart(data.Results);
+                }
+                if (data.Type == 'number') {
+                    angular.forEach(data.Results, function (d) {
+                        var name = '{';
+                        angular.forEach(d.Group, function (tagv, tagk) {
+                            if (name.length > 1) {
+                                name += ',';
+                            }
+                            name += tagk + '=' + tagv;
+                        });
+                        name += '}';
+                        d.name = name;
                     });
-                    name += '}';
-                    d.name = name;
-                });
-                $scope.bar = data.Results;
-            }
-            $scope.running = '';
-        })
-            .error(function (error) {
-            $scope.error = error;
-            $scope.running = '';
-        })["finally"](function () {
-            $scope.stop();
-        });
+                    $scope.bar = data.Results;
+                }
+                $scope.running = '';
+            })
+                .error(function (error) {
+                $scope.error = error;
+                $scope.running = '';
+            })["finally"](function () {
+                $scope.stop();
+            });
+        }
         $scope.set = function () {
-            $location.search('expr', btoa($scope.expr));
             $location.search('date', $scope.date || null);
             $location.search('time', $scope.time || null);
-            $route.reload();
+            if ($scope.expr) {
+                $location.search('expr', btoa($scope.expr));
+                $route.reload();
+            }
+            else {
+                $scope.error = "expr: empty";
+                $scope.result = null;
+                $scope.queries = null;
+            }
         };
         function toChart(res) {
             var graph = [];
@@ -777,7 +787,7 @@ bosunControllers.controller('AnnotationCtrl', ['$scope', '$http', '$location', '
         };
     }]);
 /// <reference path="0-bosun.ts" />
-var AuthService = (function () {
+var AuthService = /** @class */ (function () {
     function AuthService() {
     }
     AuthService.prototype.Init = function (authEnabled, username, roles, userPerms) {
@@ -863,7 +873,7 @@ var AuthService = (function () {
 }());
 bosunApp.service("authService", AuthService);
 //simple component to show a <username-input> easily
-var UsernameInputController = (function () {
+var UsernameInputController = /** @class */ (function () {
     function UsernameInputController(auth) {
         this.auth = auth;
     }
@@ -1198,7 +1208,7 @@ bosunControllers.controller('ConfigCtrl', ['$scope', '$http', '$location', '$rou
             if (diff == 0) {
                 intervals = 1;
             }
-            else if (Math.abs(diff) < 60 * 1000) {
+            else if (Math.abs(diff) < 60 * 1000) { // 1 minute
                 intervals = 2;
             }
             else {
@@ -1349,7 +1359,7 @@ bosunControllers.controller('ConfigCtrl', ['$scope', '$http', '$location', '$rou
         };
         return $scope;
     }]);
-var NotificationController = (function () {
+var NotificationController = /** @class */ (function () {
     function NotificationController($http) {
         var _this = this;
         this.$http = $http;
@@ -1555,14 +1565,14 @@ bosunApp.directive('tsTab', function () {
                     return;
                 }
                 switch (evt.keyCode) {
-                    case 9:// tab
+                    case 9: // tab
                         evt.preventDefault();
                         var v = ta.value;
                         var start = ta.selectionStart;
                         ta.value = v.substr(0, start) + "\t" + v.substr(start);
                         ta.selectionStart = ta.selectionEnd = start + 1;
                         return;
-                    case 13:// enter
+                    case 13: // enter
                         if (ta.selectionStart != ta.selectionEnd) {
                             return;
                         }
@@ -1934,11 +1944,11 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                 annotateEnabled: '=',
                 showAnnotations: '='
             },
-            template: '<div class="row"></div>' +
-                '<div class="row col-lg-12"></div>' +
-                '<div class"row">' +
-                '<div class="col-lg-6"></div>' +
-                '<div class="col-lg-6"></div>' +
+            template: '<div class="row"></div>' + // chartElemt
+                '<div class="row col-lg-12"></div>' + // timeElem
+                '<div class"row">' + // legendAnnContainer
+                '<div class="col-lg-6"></div>' + // legendElem
+                '<div class="col-lg-6"></div>' + // annElem
                 '</div>',
             link: function (scope, elem, attrs, $compile) {
                 var chartElem = d3.select(elem.children()[0]);
@@ -2507,22 +2517,22 @@ bosunControllers.controller('ErrorCtrl', ['$scope', '$http', '$location', '$rout
         };
     }]);
 /// <reference path="0-bosun.ts" />
-var TagSet = (function () {
+var TagSet = /** @class */ (function () {
     function TagSet() {
     }
     return TagSet;
 }());
-var TagV = (function () {
+var TagV = /** @class */ (function () {
     function TagV() {
     }
     return TagV;
 }());
-var RateOptions = (function () {
+var RateOptions = /** @class */ (function () {
     function RateOptions() {
     }
     return RateOptions;
 }());
-var Filter = (function () {
+var Filter = /** @class */ (function () {
     function Filter(f) {
         this.type = f && f.type || "auto";
         this.tagk = f && f.tagk || "";
@@ -2531,12 +2541,12 @@ var Filter = (function () {
     }
     return Filter;
 }());
-var FilterMap = (function () {
+var FilterMap = /** @class */ (function () {
     function FilterMap() {
     }
     return FilterMap;
 }());
-var Query = (function () {
+var Query = /** @class */ (function () {
     function Query(filterSupport, q) {
         this.aggregator = q && q.aggregator || 'sum';
         this.metric = q && q.metric || '';
@@ -2634,7 +2644,7 @@ var Query = (function () {
     };
     return Query;
 }());
-var GraphRequest = (function () {
+var GraphRequest = /** @class */ (function () {
     function GraphRequest() {
         this.start = '1h-ago';
         this.queries = [];
@@ -2667,7 +2677,7 @@ var GraphRequest = (function () {
     return GraphRequest;
 }());
 var graphRefresh;
-var Version = (function () {
+var Version = /** @class */ (function () {
     function Version() {
     }
     return Version;
@@ -3346,12 +3356,12 @@ bosunControllers.controller('ItemsCtrl', ['$scope', '$http', function ($scope, $
             $scope.status = 'Unable to fetch hosts: ' + error;
         });
     }]);
-var Tag = (function () {
+var Tag = /** @class */ (function () {
     function Tag() {
     }
     return Tag;
 }());
-var DP = (function () {
+var DP = /** @class */ (function () {
     function DP() {
     }
     return DP;
@@ -3780,7 +3790,7 @@ bosunApp.directive('tsForceClose', function () {
     };
 });
 /// <reference path="0-bosun.ts" />
-var TokenListController = (function () {
+var TokenListController = /** @class */ (function () {
     function TokenListController($http, auth) {
         var _this = this;
         this.$http = $http;
@@ -3834,7 +3844,7 @@ bosunApp.component('tokenList', {
     templateUrl: '/static/partials/tokenList.html'
 });
 /// <reference path="0-bosun.ts" />
-var NewTokenController = (function () {
+var NewTokenController = /** @class */ (function () {
     function NewTokenController($http, auth) {
         var _this = this;
         this.$http = $http;

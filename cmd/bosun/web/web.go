@@ -312,16 +312,17 @@ func IndexTSDB(w http.ResponseWriter, r *http.Request) {
 }
 
 type appSetings struct {
-	SaveEnabled     bool
-	AnnotateEnabled bool
-	Quiet           bool
-	Version         opentsdb.Version
+	SaveEnabled       bool
+	AnnotateEnabled   bool
+	Quiet             bool
+	Version           opentsdb.Version
+	ExampleExpression string
 
-	AuthEnabled   bool
-	TokensEnabled bool
-	Username      string
-	Permissions   easyauth.Role
-	Roles         *roleMetadata
+	AuthEnabled       bool
+	TokensEnabled     bool
+	Username          string
+	Permissions       easyauth.Role
+	Roles             *roleMetadata
 }
 
 type indexVariables struct {
@@ -349,13 +350,14 @@ func Index(t miniprofiler.Timer, w http.ResponseWriter, r *http.Request) (interf
 	}
 	u := easyauth.GetUser(r)
 	as := &appSetings{
-		SaveEnabled:     schedule.SystemConf.SaveEnabled(),
-		AnnotateEnabled: schedule.SystemConf.AnnotateEnabled(),
-		Quiet:           schedule.GetQuiet(),
-		Version:         openTSDBVersion,
-		AuthEnabled:     authEnabled,
-		TokensEnabled:   tokensEnabled,
-		Roles:           roleDefs,
+		SaveEnabled:       schedule.SystemConf.SaveEnabled(),
+		AnnotateEnabled:   schedule.SystemConf.AnnotateEnabled(),
+		Quiet:             schedule.GetQuiet(),
+		Version:           openTSDBVersion,
+		AuthEnabled:       authEnabled,
+		TokensEnabled:     tokensEnabled,
+		Roles:             roleDefs,
+		ExampleExpression: schedule.SystemConf.GetExampleExpression(),
 	}
 	if u != nil {
 		as.Username = u.Username
