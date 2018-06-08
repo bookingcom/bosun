@@ -11,9 +11,10 @@ import (
 )
 
 type unknownContext struct {
-	Time  time.Time
-	Name  string
-	Group models.AlertKeys
+	Time   time.Time
+	Name   string
+	Group  models.AlertKeys
+	States *models.IncidentState
 }
 
 var defaultUnknownTemplate = &Template{
@@ -44,11 +45,12 @@ func init() {
 	unknownDefaults.body = template.Must(template.New("body").Parse(body))
 }
 
-func (n *Notification) PrepareUnknown(t *Template, c SystemConfProvider, name string, aks []models.AlertKey) *PreparedNotifications {
+func (n *Notification) PrepareUnknown(t *Template, c SystemConfProvider, name string, aks []models.AlertKey, states *models.IncidentState) *PreparedNotifications {
 	ctx := &unknownContext{
-		Time:  time.Now().UTC(),
-		Name:  name,
-		Group: aks,
+		Time:   time.Now().UTC(),
+		Name:   name,
+		Group:  aks,
+		States: states,
 	}
 	pn := &PreparedNotifications{}
 	buf := &bytes.Buffer{}
@@ -101,8 +103,8 @@ func (n *Notification) PrepareUnknown(t *Template, c SystemConfProvider, name st
 	return pn
 }
 
-func (n *Notification) NotifyUnknown(t *Template, c SystemConfProvider, name string, aks []models.AlertKey) {
-	go n.PrepareUnknown(t, c, name, aks).Send(c)
+func (n *Notification) NotifyUnknown(t *Template, c SystemConfProvider, name string, aks []models.AlertKey, states *models.IncidentState) {
+	go n.PrepareUnknown(t, c, name, aks, states).Send(c)
 }
 
 var unknownMultiDefaults defaultTemplates
@@ -111,6 +113,7 @@ type unknownMultiContext struct {
 	Time      time.Time
 	Threshold int
 	Groups    map[string]models.AlertKeys
+	States    []*models.IncidentState
 }
 
 func init() {
@@ -135,11 +138,12 @@ func init() {
 	unknownMultiDefaults.body = template.Must(template.New("body").Parse(body))
 }
 
-func (n *Notification) PrepareMultipleUnknowns(t *Template, c SystemConfProvider, groups map[string]models.AlertKeys) *PreparedNotifications {
+func (n *Notification) PrepareMultipleUnknowns(t *Template, c SystemConfProvider, groups map[string]models.AlertKeys, states []*models.IncidentState) *PreparedNotifications {
 	ctx := &unknownMultiContext{
 		Time:      time.Now().UTC(),
 		Threshold: c.GetUnknownThreshold(),
 		Groups:    groups,
+		States:    states,
 	}
 	pn := &PreparedNotifications{}
 	buf := &bytes.Buffer{}
@@ -180,8 +184,8 @@ func (n *Notification) PrepareMultipleUnknowns(t *Template, c SystemConfProvider
 	return pn
 }
 
-func (n *Notification) NotifyMultipleUnknowns(t *Template, c SystemConfProvider, groups map[string]models.AlertKeys) {
-	n.PrepareMultipleUnknowns(t, c, groups).Send(c)
+func (n *Notification) NotifyMultipleUnknowns(t *Template, c SystemConfProvider, groups map[string]models.AlertKeys, states []*models.IncidentState) {
+	n.PrepareMultipleUnknowns(t, c, groups, states).Send(c)
 }
 
 // code common to PrepareAction / PrepareUnknown / PrepareMultipleUnknowns
