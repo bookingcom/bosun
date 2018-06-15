@@ -1,7 +1,6 @@
 package sched
 
 import (
-	"fmt"
 	"time"
 
 	"bosun.org/cmd/bosun/conf"
@@ -213,13 +212,11 @@ func (s *Schedule) sendUnknownNotifications() {
 					overThresholdSets[name] = group
 					multiUstates = append(multiUstates, ustates[ak])
 				} else {
-					slog.Infof(fmt.Sprintf("Sending unknown single, %s", ustates[ak]))
 					n.NotifyUnknown(gk.template, s.SystemConf, name, group, ustates[ak])
 				}
 			}
 		}
 		if len(overThresholdSets) > 0 {
-			slog.Infof(fmt.Sprintf("Sending multi, %s", multiUstates))
 			n.NotifyMultipleUnknowns(gk.template, s.SystemConf, overThresholdSets, multiUstates)
 		}
 	}
