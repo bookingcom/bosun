@@ -3,6 +3,7 @@ package conf
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"time"
 
 	"bosun.org/cmd/bosun/conf/template"
@@ -11,10 +12,17 @@ import (
 )
 
 type unknownContext struct {
-	Time   time.Time
-	Name   string
-	Group  models.AlertKeys
-	States *models.IncidentState
+	Time     time.Time
+	Name     string
+	Group    models.AlertKeys
+	States   *models.IncidentState
+	makeLink func(string, *url.Values) string
+}
+
+func (u *unknownContext) IncidentUnknownLink(i int64) string {
+	return u.makeLink("/incident", &url.Values{
+		"id": []string{fmt.Sprint(i)},
+	})
 }
 
 var defaultUnknownTemplate = &Template{
@@ -47,10 +55,11 @@ func init() {
 
 func (n *Notification) PrepareUnknown(t *Template, c SystemConfProvider, name string, aks []models.AlertKey, states *models.IncidentState) *PreparedNotifications {
 	ctx := &unknownContext{
-		Time:   time.Now().UTC(),
-		Name:   name,
-		Group:  aks,
-		States: states,
+		Time:     time.Now().UTC(),
+		Name:     name,
+		Group:    aks,
+		States:   states,
+		makeLink: c.MakeLink,
 	}
 	pn := &PreparedNotifications{}
 	buf := &bytes.Buffer{}
