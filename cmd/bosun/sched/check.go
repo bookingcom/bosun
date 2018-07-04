@@ -149,10 +149,18 @@ func (s *Schedule) runHistory(r *RunHistory, ak models.AlertKey, event *models.E
 					if err != nil {
 						return
 					}
+
 					incident, err = data.GetIncidentState(incident.Id)
 					if err != nil {
 						return
 					}
+
+					// notify action cancel close
+					err = s.ActionNotify(models.ActionCancelClose, "bosun", "cancelled delayed close due to severity increase", []models.AlertKey{ak})
+					if err != nil {
+						return
+					}
+
 					// Continue processing alert after cancelling the delayed close
 					break
 				}
@@ -176,10 +184,18 @@ func (s *Schedule) runHistory(r *RunHistory, ak models.AlertKey, event *models.E
 						if err != nil {
 							return
 						}
+
 						incident, err = data.GetIncidentState(incident.Id)
 						if err != nil {
 							return
 						}
+
+						// notify action close
+						err = s.ActionNotify(models.ActionClose, "bosun", fmt.Sprintf("close on behalf of delayed close by %v", action.User), []models.AlertKey{ak})
+						if err != nil {
+							return
+						}
+
 						incident.Actions[i].Fullfilled = true
 						return
 					}
@@ -191,6 +207,13 @@ func (s *Schedule) runHistory(r *RunHistory, ak models.AlertKey, event *models.E
 					if err != nil {
 						return
 					}
+
+					// notify action force close
+					err = s.ActionNotify(models.ActionForceClose, "bosun", fmt.Sprintf("forceclose on behalf of delayed close by %v", action.User), []models.AlertKey{ak})
+					if err != nil {
+						return
+					}
+
 					incident, err = data.GetIncidentState(incident.Id)
 					if err != nil {
 						return
