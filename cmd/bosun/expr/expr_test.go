@@ -151,7 +151,7 @@ func TestQueryExpr(t *testing.T) {
 	tests := map[string]map[string]Value{
 		`window("avg:m{a=*}", "5m", "1h", 2, "max")`: {
 			"a=b": Series{
-				d: 2,
+				d:                      2,
 				d.Add(time.Second * 2): 6,
 			},
 			"a=c": Series{
@@ -163,7 +163,7 @@ func TestQueryExpr(t *testing.T) {
 		},
 		`window("avg:m{a=*}", "5m", "1h", 2, "avg")`: {
 			"a=b": Series{
-				d: 1.5,
+				d:                      1.5,
 				d.Add(time.Second * 2): 5,
 			},
 			"a=c": Series{
