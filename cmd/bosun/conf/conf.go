@@ -45,11 +45,13 @@ type SystemConfProvider interface {
 	GetRedisHost() string
 	GetRedisDb() int
 	GetRedisPassword() string
+	IsRedisClientSetName() bool
 	GetTimeAndDate() []int
 	GetSearchSince() time.Duration
 
 	GetCheckFrequency() time.Duration
 	GetDefaultRunEvery() int
+	GetAlertCheckDistribution() string
 	GetUnknownThreshold() int
 	GetMinGroupSize() int
 
@@ -71,11 +73,15 @@ type SystemConfProvider interface {
 
 	GetMaxRenderedTemplateAge() int
 
+	GetExampleExpression() string
+
 	// Contexts
 	GetTSDBContext() opentsdb.Context
 	GetGraphiteContext() graphite.Context
 	GetInfluxContext() client.HTTPConfig
 	GetElasticContext() expr.ElasticHosts
+	GetAzureMonitorContext() expr.AzureMonitorClients
+	GetPromContext() expr.PromClients
 	AnnotateEnabled() bool
 
 	MakeLink(string, *url.Values) string

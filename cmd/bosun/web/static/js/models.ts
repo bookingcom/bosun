@@ -127,6 +127,7 @@ class IncidentState {
 
     Events: IncidentEvent[];
     Actions: Action[];
+    Tags: string;
 
     Subject: string;
 
@@ -139,6 +140,9 @@ class IncidentState {
 
     LastAbnormalStatus: string;
     LastAbnormalTime: number; // Epoch
+
+    PreviousIds: number[];
+    NextId: number;
 
     constructor(is) {
         this.Id = is.Id;
@@ -156,6 +160,7 @@ class IncidentState {
             }
         }
         this.Actions = new Array<Action>();
+        this.Tags = is.Tags;
         if (is.Actions) {
             for (let a of is.Actions) {
                 this.Actions.push(new Action(a))
@@ -169,6 +174,13 @@ class IncidentState {
         this.WorstStatus = is.WorstStatus;
         this.LastAbnormalStatus = is.LastAbnormalStatus;
         this.LastAbnormalTime = is.LastAbnormalTime;
+        this.PreviousIds = new Array<number>();
+        if (is.PreviousIds) {
+            for (let id of is.PreviousIds) {
+                this.PreviousIds.push(id);
+            }
+        }
+        this.NextId = is.NextId;
     }
 
 

@@ -79,23 +79,26 @@ type Conf struct {
 	HTTPUnit       []HTTPUnit
 	Riak           []Riak
 	Github         []Github
+	Elastic        []Elastic
 	// ElasticIndexFilters takes regular expressions and excludes indicies that
 	// match those filters from being monitored for metrics in the elastic.indices
 	// namespace
 	ElasticIndexFilters []string
-	RabbitMQ            []RabbitMQ
-	Nexpose             []Nexpose
-	GoogleAnalytics     []GoogleAnalytics
-	GoogleWebmaster     []GoogleWebmaster
-	Cadvisor            []Cadvisor
-	RedisCounters       []RedisCounters
-	ExtraHop            []ExtraHop
-	LocalListener       string
-	TagOverride         []TagOverride
-	HadoopHost          string
-	HbaseRegions        bool
-	Oracles             []Oracle
-	Fastly              []Fastly
+	// ElasticIndexFiltersInc is like ElasticIndexFilters, but only includes indices that match
+	ElasticIndexFiltersInc []string
+	RabbitMQ               []RabbitMQ
+	Nexpose                []Nexpose
+	GoogleAnalytics        []GoogleAnalytics
+	GoogleWebmaster        []GoogleWebmaster
+	Cadvisor               []Cadvisor
+	RedisCounters          []RedisCounters
+	ExtraHop               []ExtraHop
+	LocalListener          string
+	TagOverride            []TagOverride
+	HadoopHost             string
+	HbaseRegions           bool
+	Oracles                []Oracle
+	Fastly                 []Fastly
 }
 
 type HAProxy struct {
@@ -105,8 +108,10 @@ type HAProxy struct {
 }
 
 type HAProxyInstance struct {
-	Tier string
-	URL  string
+	User     string
+	Password string
+	Tier     string
+	URL      string
 }
 
 type Nexpose struct {
@@ -263,4 +268,18 @@ type Oracle struct {
 type OracleInstance struct {
 	ConnectionString string
 	Role             string
+}
+
+// Optional Elastic instance configuration - if omitted then the defaults are used
+// You can also define multiple instances where more than one node is running
+type Elastic struct {
+	Host            string // default is localhost
+	Port            uint16 // default is 9200
+	ClusterInterval string // default is DefaultFreq
+	IndexInterval   string // default is 15 mins
+	User            string // default is empty
+	Password        string // default is empty
+	Disable         bool   // default is false.
+	Name            string // default is host_port
+	Scheme          string // default is http
 }

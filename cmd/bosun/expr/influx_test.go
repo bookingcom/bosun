@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"bosun.org/opentsdb"
-	"github.com/MiniProfiler/go/miniprofiler"
 	"github.com/influxdata/influxdb/client/v2"
 )
 
@@ -36,6 +35,10 @@ func TestInfluxQueryDuration(t *testing.T) {
 			fmt.Sprintf("SELECT * FROM a WHERE value > 0 AND time >= '%s' AND time <= '%s' GROUP BY time(15m) fill(none)", start, end),
 		},
 		{
+			"select NON_NEGATIVE_DERIVATIVE(SUM(value)) from a WHERE value > 0", "15m",
+			fmt.Sprintf("SELECT non_negative_derivative(sum(value)) FROM a WHERE value > 0 AND time >= '%s' AND time <= '%s' GROUP BY time(15m) fill(none)", start, end),
+		},
+		{
 			"select * from a WHERE time > 0 fill(none)", "",
 			"",
 		},
@@ -62,7 +65,7 @@ func TestInfluxQuery(t *testing.T) {
 			},
 		},
 	}
-	_, err := InfluxQuery(&e, new(miniprofiler.Profile), "db", "select * from alh limit 10", "1n", "", "")
+	_, err := InfluxQuery(&e, "db", "select * from alh limit 10", "1n", "", "")
 	if err == nil {
 		t.Fatal("Should have received an error from InfluxQuery")
 	}

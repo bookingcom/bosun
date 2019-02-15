@@ -2,6 +2,7 @@ package collectors
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -20,26 +21,97 @@ import (
 func init() {
 	registerInit(func(c *conf.Conf) {
 		for _, filter := range c.ElasticIndexFilters {
-			err := AddElasticIndexFilter(filter)
+			err := AddElasticIndexFilter(filter, true)
 			if err != nil {
 				slog.Errorf("Error processing ElasticIndexFilter: %s", err)
 			}
 		}
-		collectors = append(collectors, &IntervalCollector{
-			F: func() (opentsdb.MultiDataPoint, error) {
-				return c_elasticsearch(false)
-			},
-			name:   "elasticsearch",
-			Enable: enableURL("http://localhost:9200/"),
-		})
-		collectors = append(collectors, &IntervalCollector{
-			F: func() (opentsdb.MultiDataPoint, error) {
-				return c_elasticsearch(true)
-			},
-			name:     "elasticsearch-indices",
-			Interval: time.Minute * 15,
-			Enable:   enableURL("http://localhost:9200/"),
-		})
+		for _, filter := range c.ElasticIndexFiltersInc {
+			err := AddElasticIndexFilter(filter, false)
+			if err != nil {
+				slog.Errorf("Error processing ElasticIndexFilterInc: %s", err)
+			}
+		}
+		if c.Elastic == nil {
+			// preserve the legacy defaults (localhost:9200)
+			c.Elastic = append(c.Elastic, conf.Elastic{})
+		}
+		for _, instance := range c.Elastic {
+			var indexInterval = time.Minute * 15
+			var clusterInterval = DefaultFreq
+			var err error
+			// preserve defaults of localhost:9200
+			if instance.Host == "" {
+				instance.Host = "localhost"
+			}
+			if instance.Port == 0 {
+				instance.Port = 9200
+			}
+			if instance.Scheme == "" {
+				instance.Scheme = "http"
+			}
+			if instance.Name == "" {
+				instance.Name = fmt.Sprintf("%v_%v", instance.Host, instance.Port)
+			}
+			if instance.Disable {
+				slog.Infof("Elastic instance %v is disabled. Skipping.", instance.Name)
+				continue
+			}
+			var creds string
+			if instance.User != "" || instance.Password != "" {
+				creds = fmt.Sprintf("%v:%v@", instance.User, instance.Password)
+			} else {
+				creds = ""
+			}
+			url := fmt.Sprintf("%v://%v%v:%v", instance.Scheme, creds, instance.Host, instance.Port)
+			if instance.IndexInterval != "" {
+				indexInterval, err = time.ParseDuration(instance.IndexInterval)
+				if err != nil {
+					panic(fmt.Errorf("Failed to parse IndexInterval: %v, err: %v", instance.IndexInterval, err))
+				}
+				slog.Infof("Using IndexInterval: %v for %v", indexInterval, instance.Name)
+			} else {
+				slog.Infof("Using default IndexInterval: %v for %v", indexInterval, instance.Name)
+			}
+			if instance.ClusterInterval != "" {
+				clusterInterval, err = time.ParseDuration(instance.ClusterInterval)
+				if err != nil {
+					panic(fmt.Errorf("Failed to parse ClusterInterval: %v, err: %v", instance.ClusterInterval, err))
+				}
+				slog.Infof("Using ClusterInterval: %v for %v", clusterInterval, instance.Name)
+			} else {
+				slog.Infof("Using default ClusterInterval: %v for %v", clusterInterval, instance.Name)
+			}
+			// for legacy reasons, keep localhost:9200 named elasticsearch / elasticsearch-indices
+			var name string
+			if instance.Name == "localhost_9200" {
+				name = "elasticsearch"
+			} else {
+				name = fmt.Sprintf("elasticsearch-%v", instance.Name)
+			}
+			collectors = append(collectors, &IntervalCollector{
+				F: func() (opentsdb.MultiDataPoint, error) {
+					return c_elasticsearch(false, instance)
+				},
+				name:     name,
+				Interval: clusterInterval,
+				Enable:   enableURL(url),
+			})
+			// keep legacy collector name if localhost_9200
+			if instance.Name == "localhost_9200" {
+				name = "elasticsearch-indices"
+			} else {
+				name = fmt.Sprintf("elasticsearch-indices-%v", instance.Name)
+			}
+			collectors = append(collectors, &IntervalCollector{
+				F: func() (opentsdb.MultiDataPoint, error) {
+					return c_elasticsearch(true, instance)
+				},
+				name:     name,
+				Interval: indexInterval,
+				Enable:   enableURL(url),
+			})
+		}
 	})
 }
 
@@ -50,15 +122,22 @@ var (
 		"yellow": 1,
 		"red":    2,
 	}
-	elasticIndexFilters = make([]*regexp.Regexp, 0)
+	elasticIndexFilters    = make([]*regexp.Regexp, 0)
+	elasticIndexFiltersInc = make([]*regexp.Regexp, 0)
 )
 
-func AddElasticIndexFilter(s string) error {
+func AddElasticIndexFilter(s string, exclude bool) error {
 	re, err := regexp.Compile(s)
 	if err != nil {
 		return err
 	}
-	elasticIndexFilters = append(elasticIndexFilters, re)
+	if exclude {
+		slog.Infof("Added ES Index Filter: %v", s)
+		elasticIndexFilters = append(elasticIndexFilters, re)
+	} else {
+		slog.Infof("Added ES Index Inclusion Filter: %v", s)
+		elasticIndexFiltersInc = append(elasticIndexFiltersInc, re)
+	}
 	return nil
 }
 
@@ -158,25 +237,26 @@ func (s *structProcessor) add(prefix string, st interface{}, ts opentsdb.TagSet)
 	}
 }
 
-func c_elasticsearch(collectIndices bool) (opentsdb.MultiDataPoint, error) {
+func c_elasticsearch(collectIndices bool, instance conf.Elastic) (opentsdb.MultiDataPoint, error) {
+	slog.Infof("Updating ES stats for %v", instance)
 	var status ElasticStatus
-	if err := esReq("/", "", &status); err != nil {
+	if err := esReq(instance, "/", "", &status); err != nil {
 		return nil, err
 	}
 	var clusterStats ElasticClusterStats
-	if err := esReq(esStatsURL(status.Version.Number), "", &clusterStats); err != nil {
+	if err := esReq(instance, esStatsURL(status.Version.Number), "", &clusterStats); err != nil {
 		return nil, err
 	}
 	var clusterState ElasticClusterState
-	if err := esReq("/_cluster/state/master_node", "", &clusterState); err != nil {
+	if err := esReq(instance, "/_cluster/state/master_node", "", &clusterState); err != nil {
 		return nil, err
 	}
 	var clusterHealth ElasticHealth
-	if err := esReq("/_cluster/health", "level=indices", &clusterHealth); err != nil {
+	if err := esReq(instance, "/_cluster/health", "level=indices", &clusterHealth); err != nil {
 		return nil, err
 	}
 	var indexStats ElasticIndexStats
-	if err := esReq("/_stats", "", &indexStats); err != nil {
+	if err := esReq(instance, "/_stats", "", &indexStats); err != nil {
 		return nil, err
 	}
 	var md opentsdb.MultiDataPoint
@@ -212,8 +292,10 @@ func c_elasticsearch(collectIndices bool) (opentsdb.MultiDataPoint, error) {
 	if collectIndices && isMaster {
 		for k, index := range indexStats.Indices {
 			if esSkipIndex(k) {
+				slog.Infof("Skipping index: %v", k)
 				continue
 			}
+			slog.Infof("Pulling index stats: %v", k)
 			ts := opentsdb.TagSet{"index_name": k, "cluster": clusterStats.ClusterName}
 			if indexHealth, ok := clusterHealth.Indices[k]; ok {
 				s.add("elastic.health.indices", indexHealth, ts)
@@ -233,18 +315,26 @@ func esSkipIndex(index string) bool {
 			return true
 		}
 	}
-	return false
+	for _, re := range elasticIndexFiltersInc {
+		if re.MatchString(index) {
+			return false
+		}
+	}
+	return len(elasticIndexFiltersInc) > 0
 }
 
-func esReq(path, query string, v interface{}) error {
+func esReq(instance conf.Elastic, path, query string, v interface{}) error {
+	up := url.UserPassword(instance.User, instance.Password)
 	u := &url.URL{
-		Scheme:   "http",
-		Host:     "localhost:9200",
+		Scheme:   instance.Scheme,
+		User:     up,
+		Host:     fmt.Sprintf("%v:%v", instance.Host, instance.Port),
 		Path:     path,
 		RawQuery: query,
 	}
 	resp, err := http.Get(u.String())
 	if err != nil {
+		slog.Errorf("Error querying Elasticsearch: %v", err)
 		return nil
 	}
 	defer resp.Body.Close()

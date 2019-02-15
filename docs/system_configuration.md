@@ -52,6 +52,14 @@ construct links.
 Example:
 `Hostname = "bosun.example.com"`
 
+### Scheme
+The URL that Bosun uses to construct its links. The common use case
+is in any [template functions](/definitions#template-functions) that
+construct links. the default is "http"
+
+Example:
+`Scheme = "https"`
+
 ### HTTPListen
 HTTP IP and Port to listen on. The default if not specified is to
 listen on `:8070`. However, if `HTTPSListen` is defined and `HTTPListen`
@@ -102,6 +110,13 @@ frequent as every "1m", and others that run less often (any multiple of
 
 Example:
 `DefaultRunEvery = 5`
+
+### AlertCheckDistribution
+Selects algorithm to distribute alert checks to decrease system load spikes.  There is no distribution by default. This means, if there are several checks with same period, they all will happen at the same points in time. This method is used if the option is not specified or equals to empty string.
+
+The single alternative option is `simple`. If specified, the alert checks with the same period will be uniformly distributed on second marks.
+
+Example: `AlertCheckDistribution = "simple"`
 
 ### RuleFilePath
 Path to the file containing definitions of alerts, macros, lookups,
@@ -239,6 +254,11 @@ recommended for production setups.
 
 The default is to use ledis. If Both Redis and ledis are defined, Redis will take preference and the ledis configuration will be ignored. Ledis is the default, so if `RedisHost` is not specified ledis will be used even if you have no `DBConf` configuration defined.
 
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Upgrading the database to newer versions only works with redis. With ledis you will have to delete the database to use a new version that involves a migration (schema upgrade) to the db.</p>
+</div>
+
 #### RedisHost
 The Redis hostname and port.
 
@@ -247,6 +267,10 @@ Optional integer database to store bosun data.  Defaults to 0.
 
 #### RedisPassword
 Optional password to use when connecting to Redis.
+
+#### RedisClentSetName
+Optional key defining the sending of client's name `bosun` to Redis. Defaults to true.
+If you use Netflix/dynomite then RedisClentSetName must be set to false.
 
 #### LedisDir
 Directory in which ledis will store data. Default: `LedisDir = "ledis_data"`
@@ -282,9 +306,10 @@ Address from which emails will be sent.
 Outgoing SMTP server hostname or IP address.
 
 #### Username
-(TODO: See how this and Password is used with email auth, don't have a current example.)
+SMTP username
 
 #### Password
+SMTP password
 
 #### Example
 
@@ -292,6 +317,56 @@ Outgoing SMTP server hostname or IP address.
 [SMTPConf]
 	EmailFrom = "bosun@example.com"
 	Host = "mail.example.com"
+	Username = "username"
+	Password = "fe8h392wh"
+```
+
+### AzureMonitorConf
+AzureConf enables [Azure Monitor specific functions](/expressions#azure-monitor-query-functions) in the expression language. Multiple clients may be defined allowing you to query different subscriptions and tenants from a single Bosun instance.
+
+#### AzureMonitorConf.default
+Default Azure client to use when the Prefix key is absent or is there and set to "default". When ysing multiple clients the string `default` can change to whatever you want to use in expressions to access this particular client.
+
+#### SubscriptionId
+The Azure Subscription GUID for the client. See [Getting your Azure Subscription GUID (new portal)](https://blogs.msdn.microsoft.com/mschray/2016/03/18/getting-your-azure-subscription-guid-new-portal/) for instructions on finding this with [Azure's portal](https://portal.azure.com).
+
+#### TenantId
+The Azure Tenant GUID for the client. To get the tenant you can access it via "Azure Active Directory > Properties > Directory ID in the Azure portal" as per Azure's [How to get an Azure Active Directory tenant documentation](https://docs.microsoft.com/en-us/azure/active-directory/develop/active-directory-howto-tenant).
+
+#### ClientId
+The Azure Client GUID for the client. This will be the GUID listed as the "Application ID" when you get when create the app registration under Azure Active Directory.
+
+#### ClientSecret
+The Azure generated secret for tor the client. This will be under Settings :: Keys for the application as referenced in ClientID above.
+
+#### Concurrency
+For expressions that need to make multiple http requests like `azmulti()`, this sets the amount of concurrent http requests that will be made at a time. In other words, the number of request workers.
+
+This is an optional parameter, If not set or set to `0` then it will be the default value of `10` workers. A value of `1` means no concurrency since there will only be one worker.
+
+#### DebugRequest
+If set to `true` then HTTP requests to the Azure API's will be logged to stdout. This is an optional parameter with a default of `false`.
+
+#### DebugResponse
+If set to `true` then HTTP responses from Azure API's will be logged to stdout. This is an optional parameter with a default of `false`.
+
+#### Example
+
+```
+[AzureMonitorConf]
+# Default instance will be queries when the prefix key is absent or is there and set to "default". If only defining one client for azure you would use this.
+[AzureMonitorConf.default]
+    SubscriptionId = "52c5bef7-d925-4d0e-9bcd-969dbdbb1068"
+    TenantId = "60730c79-4f4c-4782-9eca-3325638b8f9c"
+    ClientId = "2a434dc4-48df-43b8-ad0e-020798bcb36c"
+    ClientSecret = "AzureMakes+Aweso//meSecrets="
+    Concurrency = 5
+
+[AzureMonitorConf.foo]
+    SubscriptionId = "4b5922c6-0c5a-462f-876f-07072e842ade"
+    TenantId = "2e8abf15-1328-458b-8762-192139857055"
+    ClientId = "3a6d47ca-53eb-4a18-aa77-d3e2d764ba31"
+    ClientSecret = "AzureCreate+Grea/tSecrets="
 ```
 
 ### OpenTSDBConf
@@ -333,11 +408,6 @@ log formatted data and stats from those logs.
 
 The functions that would allow you to use Elastic effectively as a
 time-series based backend do not currently exist.
-
-<div class="admonition warning">
-<p class="admonition-title">Warning</p>
-<p>The Elastic config format may change before the final 0.6.0 release.</a>.</p>
-</div>
 
 #### ElasticConf.default
 Default cluster to query when [PrefixKey](/expressions#prefixkey) is not
@@ -402,6 +472,23 @@ Graphite request.
 	Host = "localhost:80"
 	[GraphiteConf.Headers]
 		X-Meow = "Mix"
+```
+
+### PromConf
+Enables querying multiple [Prometheus TSDBs](https://prometheus.io/docs/introduction/overview/) via the Prometheus HTTP v1 endpoint. The [Prometheus Query Expression
+Functions](/expressions#prometheus-query-functions) become available when this is defined.
+
+#### PromConf.default
+Default cluster to query when [PrefixKey](/expressions#prefixkey-2) is not passed to the [prometheus query functions](/expressions#prometheus-query-functions).
+
+#### Example
+
+```
+[PromConf]
+    [PromConf.default]
+        URL = "https://prometheus.kubea.example.com"
+    [PromConf.kubeb]
+        URL = "https://prometheus.kubeb.example.com"
 ```
 
 ### AnnotateConf

@@ -93,6 +93,162 @@ We don't need to understand everything in this alert, but it is worth highlighti
 
 # Query Functions
 
+## Azure Monitor Query Functions
+
+These functions are considered *preview* as of August 2018. The names, signatures, and behavior of these functions might change as they are tested in real word usage.
+
+The Azure Monitor datasource queries Azure for metric and resource information. These functions are available when [AzureMonitorConf](#system-configuration#azuremonitorconf) is defined in the system configuration.
+
+These requests are subject to the [Azure Resource Manager Request Limits](https://docs.microsoft.com/en-us/azure/azure-resource-manager/resource-manager-request-limits) so when using the `az` and `azmulti` functions you should be mindful of how many API calls your alerts are making given your configured check interval. Also using the historical testing feature to query multiple intervals of time could quickly eat through your request limit.
+
+Currently there is no special treatment or instrumentation of the rate limit by Bosun, other then errors are expected once the rate limit is hit and warning will be logged when a request responses with less than 100 reads remaining.
+
+### PrefixKey
+
+PrefixKey is a quoted string used to query Azure with different clients from a single instance of Bosun. It can be passed as a prefix to Azure query functions as in the example below. If there is no prefix used then the query will be made on default Azure client.
+
+```
+$resources = ["foo"]azrt("Microsoft.Compute/virtualMachines")
+$filteresRes = azrf($resources, "client:.*")
+["foo"]azmulti("Percentage CPU", "", $resources, "max", "5m", "1h", "")
+```
+
+### az(namespace string, metric string, tagKeysCSV string, rsg string, resName string, agType string, interval string, startDuration string, endDuration string) seriesSet
+{: .exprFunc}
+
+az queries the [Azure Monitor REST API](https://docs.microsoft.com/en-us/rest/api/monitor/) for time series data for a specific metric and resource. Responses will include at least to tags: `name=<resourceName>,rsg=<resourceGroupName>`. If the metric support multiple dimensions and tagKeysCSV is non-empty additional tag keys are added to the response.
+
+ * `namespace` is the Azure namespace that the metric lives under. [Supported metric with Azure montior](https://docs.microsoft.com/en-us/azure/monitoring-and-diagnostics/monitoring-supported-metrics) contains a list of those namespaces, for example `Microsoft.Cache/redis` and `Microsoft.Compute/virtualMachines`.
+ * `metric` is the name of the metric under the corresponding `namespace` that you want to query, for example `Percentage CPU`.
+ * `tagKeysCSV` is comma-separated list of dimension keys that you want the response to group by. For example, the `Per Disk Read Bytes/sec` metric under `Microsoft.Compute/virtualMachines` has a SlotId metric, so if you pass `"SlotId"` for this argument `SlotId` will become a tag key in the response with the values corresponding to each slot (i.e `0`)
+ * `rsg` is the name of the Azure resource group that the resource is in
+ * `resName` is the name of the resource
+ * `agType` is the type of aggregation to use can be `avg`, `min`, `max`, `total`, or `count`. If an empty string then the default is `avg`.
+ * `interval` is the Azure timegrain to use without "PT" and in lower case (ISO 8601 duration format). Common supported timegrains are `1m`, `5m`, `15m`, `30m`, `1h`, `6h`, `12h`, and `1d`. 
+ * `startDuration` and `endDuration` set the time window from now - see the OpenTSDB q() function for more details
+
+ Examples:
+
+ `az("Microsoft.Compute/virtualMachines", "Percentage CPU", "", "myResourceGroup", "myFavoriteVM", "avg", "5m", "1h", "")`
+
+ `az("Microsoft.Compute/virtualMachines", "Per Disk Read Bytes/sec", "SlotId", "myResourceGroup", "myFavoriteVM", "max", "5m", "1h", "")`
+
+### azrt(type string) azureResources
+{: .exprFunc}
+
+azrt (Azure Resources By Type) gets a list of Azure Resources that exist for a certain type. For example, `azrt("Microsoft.Compute/virtualMachines")` would return all virtualMachine resources. This list of resources can then be passed to `azrf()` (Azure Resource Filter) for additional filtering or to a query function that takes AzureResources as an argument like `azmulti()`.
+
+An error will be returned if you attempt to pass resources fetched for an Azure client with a different client.  In other words, if the resources call (e.g. `azrt()`) uses a different prefix from the time series query (e.g. `azmulti()`)).
+
+The underlying implementation of this fetches *all* resources and caches that information. So additional azrt calls within scheduled check cycle will not result in additional calls to Azure's API.
+
+### azrf(resources azureResources, filter string) azureResources
+{: .exprFunc}
+
+azrf (Azure Resource Filter) takes a resource list and filters it to less resources based on the filter. The resources argument would usually be an `azrt()` call or another `azrf` call.
+
+The filter argument supports filter supports joining terms in `()` as well as the `AND`, `OR`, and `!` operators. The following query terms are supported and are always in the format of something:something. The first part of each term (the key) is case insensitive.
+
+ * `name:<regex>` where the resource name matches the regular expression.
+ * `rsg:<regex>` where the resource group of the resource matches the resource.
+ * `otherText:<regex>` will match resources based on Azure tags. `otherText` would be the tag key and the regex will match against the tag's value. If the tag key does not exist on the resource then there will be no match.
+
+Regular expressions use Go's regular expressions which use the [RE2 syntax](https://github.com/google/re2/wiki/Syntax). If you want an exact match and not a substring be sure to anchor the term with something like `rsg:^myRSG$`.
+
+Example:
+
+```
+$resources = azrt("Microsoft.Compute/virtualMachines")
+# Filter resources to those with client azure tag that has any value
+$filteresRes = azrf($resources, "client:.*")
+azmulti("Percentage CPU", "", $filteredRes, "max", "5m", "1h", "")
+```
+
+Note that `azrf()` does not take a prefix key since it is filtering resources that have already been retrieved. The resulting azureResources will still be associated with the correct client/prefix.
+
+### azmulti(metric string, tagKeysCSV string, resources AzureResources, agType string, interval string, startDuration string, endDuration string) seriesSet
+{: .exprFunc}
+
+azmulti (Azure Multiple Query) queries a metric for multiple resources and returns them as a single series set. The arguments metric, tagKeysCSV, agType, interval, startDuration, and endDuration all behave the same as in the `az` function. Also like the `az` functions the result will be tagged with `rsg`, `name`, and any dimensions from tagKeysCSV.
+
+The resources argument is a list of resources (an azureResourcesType) as returned by `azrt` and `azrf`.
+
+Each resource queried requires an Azure Monitor API call. So if there are 20 items in the set from return of the call, 20 calls are made that count toward the rate limit. This function exists because most metrics do not have dimensions on primary attributes like the machine name.
+
+Example: 
+
+```
+$resources = azrt("Microsoft.Compute/virtualMachines")
+azmulti("Percentage CPU", "", $resources, "max", "PT5M", "1h", "")
+```
+
+## Azure Application Insights Query Functions
+
+Queries for [Azure Application Insights](https://docs.microsoft.com/en-us/azure/application-insights/app-insights-overview) use the same system configuration as the [Azure Monitor Query Functions](/expressions#azure-monitor-query-functions). Therefore these functions are available when [AzureMonitorConf](#system-configuration#azuremonitorconf) is defined in the system configuration. However, a [different API](https://dev.applicationinsights.io/documentation/overview) is used to query these metrics. In order for these to work you will have to have [AAD Auth setup](https://dev.applicationinsights.io/documentation/Authorization/AAD-Application-Setup) for the client user.
+
+Currently only Application Insights [*metrics*](https://dev.applicationinsights.io/documentation/Using-the-API/Metrics) are supported and [events](https://dev.applicationinsights.io/documentation/Using-the-API/Events) are *not* supported.
+
+These queries share the same [Prefix Key as Azure Montitor queries](/expressions#prefixkey).
+
+### aiapp() azureAIApps
+{: .exprFunc}
+
+aiapp (Application Insights Apps) gets a list of Azure [application insights applications/resources](https://docs.microsoft.com/en-us/azure/application-insights/app-insights-create-new-resource) to query. This can be passed to the `ai()` function, or filtered to a subset of applications using the `aippf()` function, which can then also be passed to the `ai()` function. 
+
+The implementation for getting the list of applications uses the [Azure components/list REST API](https://docs.microsoft.com/en-us/rest/api/application-insights/components/components_list).
+
+### aippf(apps azureAIApps, filter string) azureAIApps
+{: .exprFunc}
+
+aiappf (Application Insights Apps Filter) filters a list of applications from `aiapp()` to a subset of applications based on the `filter` string. The result can then be passed to the `ai()` function. The filter behaves in a similar way to the way [`azrf()`](expressions#azrfresources-azureresources-filter-string-azureresources) filters resources.
+
+The filter argument supports filter supports joining terms in `()` as well as the `AND`, `OR`, and `!` operators. The following query terms are supported and are always in the format of something:something. The first part of each term (the key) is case insensitive.
+
+ * `name:<regex>` where the resource name of the insights application matches the regular expression.
+ * `otherText:<regex>` will match insights applications based on the Azure tags on the insights application resource. `otherText` would be the tag key and the regex will match against the tag's value. If the tag key does not exist on the resource then there will be no match.
+
+Regular expressions use Go's regular expressions which use the [RE2 syntax](https://github.com/google/re2/wiki/Syntax). If you want an exact match and not a substring be sure to anchor the term with something like `name:^myApp$`.
+
+### ai(metric, segmentsCSV, filter string, apps azureAIApps, agType, interval, startDuration, endDuration string) seriesSet
+{: .exprFunc}
+
+ai (Application Insights) queries application insights metrics from multiple application insights applications, tagging the values with the `app=AppName` key-value pair where AppName is the name of the Application Insights resource. The response will also be tagged by segments if any are requested.
+
+ * `metric` is the name of the metric you wish to query. A list of ["Default Metrics" is listed in the API Documentation](https://dev.applicationinsights.io/documentation/Using-the-API/Metrics). You can also use the `aimd()` function to see what metrics are available.
+ * `segmentsCSV` is a comma-separated is comma-separated list of "segments" that you want the response to group by. For example with the default metric `requests/count` you might have `client/countryOrRegion,cloud/roleInstance`. You can also use the `aimd()` function to see what segments/dimensions are available.
+ * `filter` is an odata filter than can be used to refine results. See more information below.
+ * `apps` is a list of azure applications to query returned by `aiapp()` or `aiappf()`.
+ * `agType` is the aggregation type to use. Common values are `avg`, `min`, `max`, `sum`, or `count`. If the aggregation type is not available the error will indicate what types are. You can use the `aimd()` function to see what aggregations are available. 
+ * `interval` is the Azure timegrain to use without "PT" and in lower case (ISO 8601 duration format). Common supported timegrains are `1m`, `5m`, `15m`, `30m`, `1h`, `6h`, `12h`, and `1d`. If empty the value will be `1m`.
+ * `startDuration` and `endDuration` set the time window from now - see the OpenTSDB q() function for more details.
+
+Regarding the `filter` argument it seems [Azure's documentation](https://dev.applicationinsights.io/reference) is not clear on supported OData operations. That being said here are some observations:
+
+ * `startswith` and `contains` are valid string operations in the filter.
+ * You can *not do* negated matches. The API will accept them but they seem to have no impact. See this [Azure Feedback Issue](https://feedback.azure.com/forums/357324-application-insights/suggestions/7924191--not-filters-in-application-insights).
+ * You can filter on dimension/segements that are relevant to the metric, but were not requested as part of `segmentsCSV`.
+
+These requests are subject to a different [rate limit](https://dev.applicationinsights.io/documentation/Authorization/Rate-limits).
+
+> Using Azure Active Directory for authentication, throttling rules are applied per AAD client user. Each AAD user is able to make up to 200 requests per 30 seconds, with no cap on the total calls per day.
+
+A HTTP request is made per application. Unlike `azmulti()` these requests are *serial* and not parallelized since the ratelimit is of a relatively short duration (30 seconds). That means you can expect this query to be slow relative to the number of applications you are querying.
+
+Example:
+
+```
+$selectedApps = aiappf(aiapp(), "environment:prd")
+$filter = "startswith(operation/name, 'POST')"
+ai("requests/duration", "cloud/roleInstance", $filter, $selectedApps, "avg", "1h", "3d", "")
+```
+
+### aimd(apps azureAIApps) Info
+{: .exprFunc}
+
+aimd (Application Insights Metadata) return metrics and their related aggregations and dimensions/segments per application. The list of applications should be provided with `aiapp()` or `aiappf()`. For most use cases filtering to a single app is ideal since the metadata object for each application is generally fairly large.
+
+This is not meant to be used in normal expression workflow (e.g. *not* for alerting or templates), but rather exists so in the Bosun's expression editor UI, you can get a list of what can be queried with the `ai()` function.
+
 ## Graphite Query Functions
 
 ### graphite(query string, startDuration string, endDuration string, format string) seriesSet
@@ -286,10 +442,19 @@ Generic query from endDuration to startDuration ago. If endDuration is the empty
 
 Band performs `num` queries of `duration` each, `period` apart and concatenates them together, starting `period` ago. So `band("avg:os.cpu", "1h", "1d", 7)` will return a series comprising of the given metric from 1d to 1d-1h-ago, 2d to 2d-1h-ago, etc, until 8d. This is a good way to get a time block from a certain hour of a day or certain day of a week over a long time period.
 
+Note: this function wraps a more general version `bandQuery(query string, duration string, period string, eduration string, num scalar) seriesSet`, where `eduration` specifies the end duration for the query to stop at, as with `q()`.
+
 ### over(query string, duration string, period string, num scalar) seriesSet
 {: .exprFunc}
 
-Over's arguments behave the same way as band. However over shifts the time of previous periods to be now, tags them with duration that each period was shifted, and merges those shifted periods into a single seriesSet. This is useful for displaying time over time graphs. For example, the same day week over week would be `over("avg:1h-avg:rate:os.cpu{host=ny-bosun01}", "1d", "1w", 4)`.
+Over's arguments behave the same way as band. However over shifts the time of previous periods to be now, tags them with duration that each period was shifted, and merges those shifted periods into a single seriesSet, which includes the most recent period. This is useful for displaying time over time graphs. For example, the same day week over week would be `over("avg:1h-avg:rate:os.cpu{host=ny-bosun01}", "1d", "1w", 4)`.
+
+Note: this function wraps a more general version `overQuery(query string, duration string, period string, eduration string, num scalar) seriesSet`, where `eduration` specifies the end duration for the query to stop at, as with `q`. Results are still shifted to end at current time.
+
+### shiftBand(query string, duration string, period string, num scalar) seriesSet
+{: .exprFunc}
+
+shiftBand's behaviour is very similar to `over`, however the most recent period is not included in the seriesSet. This function could be useful for anomaly detection when used with `aggr`, to calculate historical distributions to compare against.
 
 ### change(query string, startDuration string, endDuration string) numberSet
 {: .exprFunc}
@@ -323,6 +488,158 @@ instead of concatenating series together, each series is reduced to a number,
 and those numbers created into a series.
 
 In addition to supporting Bosun's reduction functions that take on argument, percentile operations may be be done by setting `funcName` to p followed by number that is between 0 and 1 (inclusively). For example, `"p.25"` will be the 25th percentile, `"p.999"` will be the 99.9th percentile. `"p0"` and `"p1"` are min and max respectively (However, in these cases it is recommended to use `"min"` and `"max"` for the sake of clarity.
+
+## Prometheus Query Functions
+
+Prometheus query functions query Prometheus TSDB(s) using the using the [Prometheus HTTP v1 API](https://prometheus.io/docs/prometheus/latest/querying/api/). When [`PromConf` in the system configuration](/system_configuration#promconf) is added these functions become available. 
+
+There are currently two types of functions: functions that return time series sets (seriesSet) and information functions that are meant to be used interactively in the expression editor for information about metrics and tags.
+
+### PrefixKey
+The PrefixKey is a quoted string used to query different promthesus backends in [`PromConf` in the system configuration](/system_configuration#promconf). If the PrefixKey is missing (there are no brackets before the function), then "default" is used. For example the prefix in the following is `["it"]`:
+
+```
+["it"]prom("up", "namespace", "", "sum", "5m", "1h", "")
+```
+
+In the case of `promm` and `promratem`, the prefix may have multiple keys separated by commas to allow for querying multiple prom datasources at once, for example:
+
+```
+["it,default"]promm("up", "namespace", "", "sum", "5m", "1h", "")
+```
+
+### Series Removed from Responses
+
+When a Prometheus query is made all time series in the response do not have to have the same set of tag keys. For example, when making a PromQL request that has group `by (host,interface)` results may be included in the response that contain only `host`, only `interface`, or no tag keys at all. Bosun requires that the tag keys be consistent for each series within a seriesSet. Therefore, these results are removed from the responses when using functions like `prom`, `promrate`, `promm`, and `promratem`.
+
+<div class="admonition">
+<p class="admonition-title">Note</p>
+<p>This behavior may change in the future to an alternative design. Instead of dropping these series, the series could be retained but the missing tag keys would be added to the response with some sort of value to represent that the tag is missing.</p>
+</div>
+
+### prom(metric, groupByTags, filter, agType, stepDuration, startDuration, endDuration string) seriesSet
+{: .exprFunc}
+
+prom queries a Promethesus TSDB for time series data. It accomplishes this by generating a PromQL query from the given arguments.
+
+ * `metric` is the name of the to query. To get a list of available metrics use the `prommetrics()` function.
+ * `groupByTags` is a comma separated list of tag keys to aggregate the response by.
+ * `filter` filters to results using [Prometheus Time Series Selectors](https://prometheus.io/docs/prometheus/latest/querying/basics/#time-series-selectors). This functions analogous to a `WHERE` clause in SQL. For example: `job=~".*",method="get"`. Operators are `=`, `!=`, `=~`, and `!~` for equals, not equals, [RE2](https://github.com/google/re2/wiki/Syntax) match, and not RE2 match respectively. This string is inserted into the generated promQL query directly.
+ * `agType` is the the aggregation function to perform such as `"sum"` or `"avg"`. It can be any [Prometheus Aggregation operator](https://prometheus.io/docs/prometheus/latest/querying/operators/#aggregation-operators).
+ * `stepDuration` is Prometheus's evaluation step duration. This is like downsampling, except that takes the datapoint that is most recently before (or matching) the step based on the start time. If there are no samples in that duration, the sample will be repeated. See [Prometheus Docs Issue #699].(https://github.com/prometheus/docs/issues/699).
+ * `startDuration` and `endDuration` determain the start and end time based on the current time (or currently selected time in the expression/rule editor). They are then used to send an absolute time range for the Prometheus request.
+
+Example:
+
+```
+$metric      = "up"
+$groupByTags = "namespace"
+$filter      = ''' service !~ "kubl.*" '''
+$agg         = "sum"
+$step        = "1m"
+
+prom($metric, $groupByTags, $filter, $agg, $step, "1h", "")
+```
+
+The above example would generate a PromQL query of `sum( up { service !~ "kubl.*" } ) by ( namespace )`. The time range and step are sent via HTTP query parameters.
+
+### promrate(metric, groupByTags, filter, agType, rateStepDuration, stepDuration, startDuration, endDuration string) seriesSet
+{: .exprFunc}
+
+promrate is like `prom` function, except that is for rate per-second calculations on metrics that are counters. It therefore includes the extra `rateStepDuration` argument which is for calculating the step of the rate calculation. The `stepDuration` is then for the step of the aggregation operation that is on top of the calculated rate. This is performed using [the `rate()` function in PromQL](https://prometheus.io/docs/prometheus/latest/querying/functions/#rate).
+
+Example:
+
+```
+$metric      = "container_memory_working_set_bytes"
+$groupByTags = "container_name,namespace"
+$filter      = ''' container_name !~ "pvc-.*$" '''
+$agg         = "sum"
+$rateStep    = "1m"
+$step        = "5m"
+
+promrate($metric, $groupByTags, $filter, $agg, $rateStep, $step, "1h", "")
+```
+
+The above example would generate a PromQL query of `sum(rate( container_memory_working_set_bytes { container_name !~ "pvc-.*$" }  [1m] )) by ( container_name,namespace )`. The time range and step are sent via HTTP query parameters.
+
+### promm(metric, groupByTags, filter, agType, stepDuration, startDuration, endDuration string) seriesSet
+{: .exprFunc}
+
+promm (Prometheus Multiple) is like the `prom` function, except that it queries multiple Prometheus TSDBs and combines the result into a single seriesSet. A tag key of `bosun_prefix` with the tag value set to the prefix is added to the results to ensure that series are unique in the result.
+
+Example:
+
+```
+$metric      = "container_memory_working_set_bytes"
+$groupByTags = "container_name,namespace"
+$filter      = ''' container_name !~ "pvc-.*$" '''
+$agg         = "sum"
+$step        = "5m"
+
+$q = ["it,default"]promm($metric, $groupByTags, $filter, $agg, $step, "1h", "")
+max($q)
+
+# You could use the aggr function to aggregate across clusters if you like
+# aggr($q, $groupByTags, $agg)
+```
+
+In the above example `$q` will be a seriesSet with the tag keys of `container_name`, `namespace`, and `bosun_prefix`. The values for the `bosun_prefix` key will be either `it` or `default` for each series in the set.
+
+### promratem(metric, groupByTags, filter, agType, rateStepDuration, stepDuration, startDuration, endDuration string) seriesSet
+{: .exprFunc}
+
+promratem (Prometheus Rate Multiple) is like the `promm` function is to the `prom` function. It allows you to do a per-second rate query against multiple Prometheus TSDBs and combines the result into a single seriesSet -- adding the `bosun_prefix` tag key to the result. It behaves the same as the `promm` function, but like `promrate`, it has the extra `rateStepDuration` argument.
+
+### promras(promql, stepDuration, startDuration, endDuration string) seriesSet
+{: .exprFunc}
+
+Instead of building a promql query like the `prom` and `promrate` functions, promras (Prometheus Raw Aggregate Series) allows you to query Prometheus using promql with some restrictions:
+
+ 1. The query must return a time series (a Prometheus matrix)
+ 2. The top level function in promql must be an [Prometheus Aggregation Operator](https://prometheus.io/docs/prometheus/latest/querying/operators/#aggregation-operators) with a `by` clause.
+
+Example:
+
+```
+promras(''' sum(rate(container_fs_reads_total[1m]) + rate(container_fs_writes_total[1m])) by (namespace) ''', "2m", "2h", "")
+```
+
+### prommras(promql, stepDuration, startDuration, endDuration string) seriestSet
+{: .exprFunc}
+
+prommras (Prometheus Multiple Raw Aggregate Series) is like the `promras` function excepts that it queries multiple prometheus instances and adds the "bosun_prefix" tag to the results like the `promm` and `prommrate` functions.
+
+Example:
+
+```
+# You can still use string interpolation of $variables in promras and prommras
+$step = 1m
+$reads = container_fs_reads_total[$step]
+$writes = container_fs_writes_total[$step]
+["default,it"]prommras(''' sum(rate($reads) + rate($writes)) by (namespace) ''', "2m", "2h", "")
+```
+
+### prommetrics() Info
+{: .exprFunc}
+
+prommetrics returns a list of metrics that are available in the Prometheus TSDB. This is not meant to be used in alerting, it is for use in the expression editor for getting information to build queries. For you example, you might open up another expression tab in bosun and use the output as a reference. This function supports a prefix so examples would be `prommetrics()` and `["it"]prommetrics()`.
+
+It gets the list of metrics by using the [Prometheus Label Values HTTP API](https://prometheus.io/docs/prometheus/latest/querying/api/#querying-label-values) to get the values for the `__name__` value.
+
+### promtags(metric string, endDuration string, startDuration string) Info
+{: .exprFunc}
+
+promtags returns various tag information for the metric  ("tag" ~= "Label" in Prometheus terminology). It does a raw query (querying the metric only) for the provided duration and returns the tag information for the metric in that given time period. This is not meant to be used in alerting, it is for use in the expression editor for getting information to build queries.
+
+The result has the following Properties:
+
+ * Metric: The name of the metric
+ * Keys: A list of the tag keys available for the metric
+ * KeysToValues: A map/dictionary of tag keys to a list of their unique values
+ * UniqueSets: A list of unique tag key/value combination pairs that represent complete series
+
+ Examples: `promtags("up", "10", "")`, `["it"]promtags("container_memory_working_set_bytes")`.
 
 # Annotation Query Functions
 These function are available when annotate is enabled via Bosun's configuration.
@@ -498,12 +815,71 @@ Returns the number of seconds since the most recent data point in each series.
 ## streak(seriesSet) numberSet
 {: .exprFunc}
 
-Returns the length of the longest streak of values that evaluate to true (i.e. max amount of contiguous non-zero values found).
+Returns the length of the longest streak of values that evaluate to true for each series in the set (i.e. max amount of contiguous non-zero values found). A single true value in the series returns 1.
+
+This is useful to create an expression that is true if a certain number of consecutive observations exceeded a threshold - as in the following example:
+
+```
+$seriesA = series("host=server01", 0,0, 60,35, 120,35, 180,35, 240,5)
+$seriesB = series("host=server02", 0,0, 60,35, 120, 5, 180, 5, 240,5)
+$sSet = merge($seriesA, $seriesB)
+$isAbove = $sSet > 30
+$consecutiveCount = streak($isAbove)
+# $consecutiveCount: a numberSet where server01 has a value of 3, server02 has a value of 1
+# Are there 3 or more adjacent/consecutive/contiguous observations greater than 30?
+$consecutiveCount >= 3
+```
 
 ## sum(seriesSet) numberSet
 {: .exprFunc}
 
-Sum.
+Sum returns the sum (a.k.a. "total") for each series in the set.
+
+# Aggregation Functions
+
+Aggregation functions take a seriesSet, and return a new seriesSet.
+
+## aggr(series seriesSet, groups string, aggregator string) seriesSet
+{: .exprFunc}
+
+Takes a seriesSet and combines it into a new seriesSet with the groups specified, using an aggregator to merge any series that share the matching group values. If the groups argument is an empty string, all series are combined into a single series, regardless of existing groups. 
+
+The available aggregator functions are: `"avg"` (average), `"min"` (minimum), `"max"` (maximum), `"sum"` and `"pN"` (percentile) where N is a floating point number between 0 and 1 inclusive. For example, `"p.25"` will be the 25th percentile, `"p.999"` will be the 99.9th percentile. `"p0"` and `"p1"` are min and max respectively (However, in these cases it is recommended to use `"min"` and `"max"` for the sake of clarity.
+
+The aggr function can be particularly useful for removing anomalies when comparing timeseries over periods using the over function. 
+
+Example:
+
+```
+$weeks = over("sum:1m-avg:os.cpu{region=*,color=*}", "24h", "1w", 3)
+$agg = aggr($weeks, "region,color", "p.50")
+```
+
+The above example uses `over` to load a 24 hour period over the past 3 weeks. We then use the aggr function to combine the three weeks into one, selecting the median (`p.50`) value of the 3 weeks at each timestamp. This results in a new seriesSet, grouped by region and color, that represents a "normal" 24 hour period with anomalies removed.
+
+An error will be returned if a group is specified to aggregate on that does not exist in the original seriesSet.
+
+The aggr function expects points in the original series to be aligned by timestamp. If points are not aligned, they are aggregated separately. For example, if we had a seriesSet,
+
+Group       | Timestamp | Value |
+----------- | --------- | ----- |
+{host=web01} | 1 | 1 |
+{host=web01} | 2 | 7 |
+{host=web01} | 1 | 4 |
+
+and applied the following aggregation:
+
+```
+aggr($series, "host", "max")
+```
+
+we would receive the following aggregated result:
+
+Group       | Timestamp | Value | Timestamp | Value |
+----------- | --------- | ----- | --------- | ----- |
+{host=web01} | 1 | 4 | 2 | 7 |
+
+aggr also does not attempt to deal with NaN values in a consistent manner. If all values for a specific timestamp are NaN, the result for that timestamp will be NaN. If a particular timestamp has a mix of NaN and non-NaN values, the result may or may not be NaN, depending on the aggregation function specified.
 
 # Group Functions
 
@@ -527,7 +903,7 @@ Accepts a tag key to remove from the set. The function will error if removing th
 ## t(numberSet, group string) seriesSet
 {: .exprFunc}
 
-Transposes N series of length 1 to 1 series of length N. If the group parameter is not the empty string, the number of series returned is equal to the number of tagks passed. This is useful for performing scalar aggregation across multiple results from a query. For example, to get the total memory used on the web tier: `sum(t(avg(q("avg:os.mem.used{host=*-web*}", "5m", "")), ""))`.
+Transposes N series of length 1 to 1 series of length N. If the group parameter is not the empty string, the number of series returned is equal to the number of tagks passed. This is useful for performing scalar aggregation across multiple results from a query. For example, to get the total memory used on the web tier: `sum(t(avg(q("avg:os.mem.used{host=*-web*}", "5m", "")), ""))`. See [Understanding the Transpose Function](/t) for more explanation.
 
 How transpose works conceptually
 

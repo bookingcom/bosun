@@ -5,7 +5,11 @@
 </div>
 <div ng-show="incident && state">
 	<div class="row">
-		<h3> Incident {{incident.Id}}</h3>
+		<h3>
+			<span title="This exclamation icon represents that the alert of this incident is in an active (non-normal) state." ng-show="isActive" class="fa fa-exclamation-circle"></span>
+			<a ng-href="{{editSilenceLink}}" title="This mute icon represents that the alert of this incident has been silenced until {{time(silence.End)}} UTC." ng-show="silence" class="fa fa-volume-off"></a>
+			Incident {{incident.Id}} <span ng-show="incident.NeedAck"> - needs acknowledgement</span>
+		</h3>
 	</div>
 	<div class="row">
 		<p ng-show="incident.End">End Time:<span ts-time="incident.Start" ts-end-time="incident.End" no-link="true"></span></p>
@@ -52,6 +56,23 @@
 					<a ng-href="/history?key={{encode(incident.AlertKey)}}">Full History</a>,
 					<a ng-href="{{configLink}}">Rule Editor</a>,
 					<a ng-href="/expr?expr={{btoa(incident.Expr)}}">Expression</a>
+				</div>
+			</div>
+			<div class="row">
+				<div class="col-sm-3">
+					<p><strong>Previous Incidents ({{ incident.PreviousIds ? incident.PreviousIds.length : 0 }}):</strong></p>
+				</div>
+				<div class="col-sm-9">
+					<a ng-repeat="id in incident.PreviousIds | limitTo:5" ng-href="/incident?id={{encode(id)}}">#{{id}} </a>
+					<p ng-hide="incident.PreviousIds">None</p>
+				</div>
+			</div>
+			<div class="row" ng-hide="incident.NextId == 0">
+				<div class="col-sm-3">
+					<p><strong>Next Incident:</strong></p>
+				</div>
+				<div class="col-sm-9">
+					<a ng-href="/incident?id={{encode(incident.NextId)}}">#{{incident.NextId}}</a>
 				</div>
 			</div>
 		</div>
@@ -126,7 +147,7 @@
 			<h4 class="panel-title">
 				<a href>
 					<span ng-bind="v.Status"></span>
-					<span class="pull-right" ng-show="v.Time" ts-time="v.Time" ts-end-time="v.EndTime" no-link="true"></span>
+					<span class="pull-right" ng-show="v.Time" ts-time="v.Time" ts-end-time="events[$index-1].Time ? events[$index-1].Time : (incident.Open ? undefined : incident.End) " no-link="true"></span>
 				</a>
 			</h4>
 		</div>

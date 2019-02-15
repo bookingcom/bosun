@@ -75,7 +75,7 @@
 </form>
 <div class="row" ng-show="testSilences">
 	<div class="col-sm-12">
-		<h2>Will be silenced:</h2>
+		<h2>Will be silenced</h2>
 	</div>
 	<div class="col-sm-12">
 		<ul class="list-unstyled">
@@ -88,6 +88,12 @@
 	<div class="col-sm-12">
 		<button class="btn btn-primary" ng-click="confirm()" ng-disabled="disableConfirm">confirm</button>
 		<span ng-show="edit" class="label label-warning">editing rule {{edit}}</span>
+	</div>
+</div>
+
+<div class="row">
+	<div class="col-lg-12">
+		<h2>Existing Silences</h2>
 	</div>
 </div>
 <div class="row" ng-repeat="silence in silences">
@@ -114,7 +120,7 @@
 					<td ng-bind="s.User"></td>
 					<td ng-bind="s.Message"></td>
 					<td>
-						<a class="btn btn-primary btn-xs" ng-href="/silence?start={{time(s.Start)}}&end={{time(s.End)}}&alert={{s.Alert}}&tags={{encode(s.TagString)}}{{s.Forget ? '&forget': ''}}&edit={{id}}">edit</a>
+						<a class="btn btn-primary btn-xs" ng-href="{{getEditSilenceLink(s, id)}}">edit</a>
 						<button class="btn btn-danger btn-xs" ng-click="clear(id)">clear</button>
 					</td>
 				</tr>
