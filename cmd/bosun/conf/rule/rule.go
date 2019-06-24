@@ -44,6 +44,7 @@ type Conf struct {
 	tree            *parse.Tree
 	node            parse.Node
 	unknownTemplate string
+	errorTemplate   string
 	bodies          *template.Template
 	subjects        *template.Template
 	customTemplates map[string]*template.Template
@@ -193,6 +194,8 @@ func (c *Conf) loadGlobal(p *parse.PairNode) {
 	switch k := p.Key.Text; k {
 	case "unknownTemplate":
 		c.unknownTemplate = v
+	case "errorTemplate":
+		c.errorTemplate = v
 	case "squelch":
 		c.squelch = append(c.squelch, v)
 		if err := c.Squelch.Add(v); err != nil {

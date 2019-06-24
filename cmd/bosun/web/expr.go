@@ -252,7 +252,7 @@ func procRule(t miniprofiler.Timer, ruleConf conf.RuleConfProvider, a *conf.Aler
 			n := conf.Notification{
 				Email: []*mail.Address{m},
 			}
-			n.PrepareAlert(rt, string(primaryIncident.AlertKey), rt.Attachments...).Send(s.SystemConf)
+			n.PrepareAlert(rt, primaryIncident, rt.Attachments...).Send(s.SystemConf)
 		}
 		nots, aNots = buildNotificationPreviews(a, rt, primaryIncident, s.SystemConf, ruleConf)
 		data = s.Data(rh, primaryIncident, a, false)
@@ -285,7 +285,7 @@ func buildNotificationPreviews(a *conf.Alert, rt *models.RenderedTemplates, inci
 	}
 
 	for name, not := range nots {
-		previews[name] = not.PrepareAlert(rt, string(incident.AlertKey), attachments...)
+		previews[name] = not.PrepareAlert(rt, incident, attachments...)
 		actions := map[string]*conf.PreparedNotifications{}
 		actionPreviews[name] = actions
 		// for all action types. just loop through known range. Update this if any get added

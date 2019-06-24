@@ -71,6 +71,7 @@ func TestCheckFlapping(t *testing.T) {
 		{models.StCritical, true},
 		{models.StWarning, false},
 		{models.StCritical, false},
+		{models.StError, true},
 	}
 
 	for i, trans := range transitions {
@@ -382,6 +383,70 @@ func TestCheckNotify(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("failed to receive notification before timeout")
+	}
+}
+
+func TestCheckNotifyError(t *testing.T) {
+	defer setup()()
+	nc := make(chan string, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := ioutil.ReadAll(r.Body)
+		nc <- string(b)
+	}))
+	defer ts.Close()
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := rule.NewConf("", conf.EnabledBackends{}, nil, fmt.Sprintf(`
+		template t {
+			subject = s
+			err = {{.Alert.Name}}: error alert
+			body = b
+		}
+		notification n {
+			post = http://%s/
+			errorBody = err
+		}
+		alert a {
+			template = t
+			critNotification = n
+			crit = 1
+		}
+	`, u.Host))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := initSched(&conf.SystemConf{}, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &RunHistory{
+		Events: map[models.AlertKey]*models.Event{
+			models.NewAlertKey("a", opentsdb.TagSet{"h": "x"}): {Status: models.StError},
+		},
+	}
+	s.RunHistory(r)
+	s.CheckNotifications()
+	//expectPendingNotifications(1)
+	//s.sendNotifications()
+	gotExpected := false
+Loop:
+	for {
+		select {
+		case r := <-nc:
+			if r == "a: error alert" {
+				gotExpected = true
+			} else {
+				t.Fatalf("unexpected: %v", r)
+			}
+		// TODO: remove this silly timeout-based test
+		case <-time.After(time.Second):
+			break Loop
+		}
+	}
+	if !gotExpected {
+		t.Errorf("didn't get expected result")
 	}
 }
 

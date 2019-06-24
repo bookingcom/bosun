@@ -46,6 +46,7 @@ type SystemConf struct {
 	MinGroupSize  int
 
 	UnknownThreshold       int
+	ErrorsLimit       	   int		// limit amount off errors store for alerts
 	CheckFrequency         Duration // Time between alert checks: 5m
 	DefaultRunEvery        int      // Default number of check intervals to run each alert: 1
 	AlertCheckDistribution string   // Method to distribute alet checks. No distribution if equals ""
@@ -531,6 +532,11 @@ func (sc *SystemConf) GetAlertCheckDistribution() string {
 // should be grouped into a single notification
 func (sc *SystemConf) GetUnknownThreshold() int {
 	return sc.UnknownThreshold
+}
+
+// GetErrorsLimit returns the maximum numbers of errors that can be stored for alert
+func (sc *SystemConf) GetErrorsLimit() int {
+	return sc.ErrorsLimit
 }
 
 // GetMinGroupSize returns the minimum number of alerts needed to group the alerts

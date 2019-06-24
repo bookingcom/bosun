@@ -2,10 +2,13 @@ package database
 
 import (
 	"bosun.org/models"
+	"bosun.org/slog"
+
 	"encoding/json"
 	"fmt"
-	"github.com/garyburd/redigo/redis"
 	"time"
+
+	"github.com/garyburd/redigo/redis"
 )
 
 /*
@@ -21,11 +24,13 @@ type ErrorDataAccess interface {
 	MarkAlertSuccess(name string) error
 	MarkAlertFailure(name string, msg string) error
 	GetFailingAlertCounts() (int, int, error)
+	GetFailingAlertCountsByName(name string, limit int) (int, error)
 
 	GetFailingAlerts() (map[string]bool, error)
 	IsAlertFailing(name string) (bool, error)
 
 	GetFullErrorHistory() (map[string][]*models.AlertError, error)
+	GetFullErrorHistoryByName(name string) ([]*models.AlertError, error)
 	ClearAlert(name string) error
 	ClearAll() error
 }
@@ -110,6 +115,46 @@ func (d *dataAccess) GetFailingAlertCounts() (int, int, error) {
 		return 0, 0, err
 	}
 	return failing, events, nil
+}
+
+func (d *dataAccess) GetFailingAlertCountsByName(name string, limit int) (int, error) {
+	conn := d.Get()
+	defer conn.Close()
+	count, err := redis.Int(conn.Do("LLEN", errorListKey(name)))
+	if err != nil {
+		return 0, err
+	}
+	if limit > 0 && count > limit {
+		_, err := conn.Do("LTRIM", errorListKey(name), 0, limit-count)
+		if err != nil {
+			slog.Errorf("Error while cleanup old errors for %v: %v", name, err)
+		}
+		_, err = conn.Do("LREM", alertsWithErrors, limit-count, name)
+		if err != nil {
+			slog.Errorf("Error while cleanup old errors from %v for %v: %v", alertsWithErrors, name, err)
+		}
+	}
+	return count, nil
+}
+
+func (d *dataAccess) GetFullErrorHistoryByName(name string) ([]*models.AlertError, error) {
+	conn := d.Get()
+	defer conn.Close()
+
+	rows, err := redis.Strings(conn.Do("LRANGE", errorListKey(name), 0, -1))
+	if err != nil {
+		return nil, err
+	}
+	list := make([]*models.AlertError, len(rows))
+	for i, row := range rows {
+		ae := &models.AlertError{}
+		err = json.Unmarshal([]byte(row), ae)
+		if err != nil {
+			return nil, err
+		}
+		list[i] = ae
+	}
+	return list, nil
 }
 
 func (d *dataAccess) GetFailingAlerts() (map[string]bool, error) {

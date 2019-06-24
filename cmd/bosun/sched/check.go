@@ -104,6 +104,7 @@ func (s *Schedule) RunHistory(r *RunHistory) {
 func (s *Schedule) runHistory(r *RunHistory, ak models.AlertKey, event *models.Event, silenced SilenceTester) (checkNotify bool, err error) {
 	event.Time = r.Start
 	a := s.RuleConf.GetAlert(ak.Name())
+
 	if a.UnknownsNormal && event.Status == models.StUnknown {
 		event.Status = models.StNormal
 	}
@@ -122,6 +123,7 @@ func (s *Schedule) runHistory(r *RunHistory, ak models.AlertKey, event *models.E
 
 	incident, err = data.GetOpenIncident(ak)
 	if err != nil {
+		slog.Error(err)
 		return
 	}
 
@@ -320,7 +322,7 @@ func (s *Schedule) runHistory(r *RunHistory, ak models.AlertKey, event *models.E
 		}
 		incident.NeedAck = true
 		switch event.Status {
-		case models.StCritical, models.StUnknown:
+		case models.StCritical, models.StUnknown, models.StError:
 			notify(a.CritNotification)
 		case models.StWarning:
 			notify(a.WarnNotification)
@@ -362,7 +364,25 @@ func (s *Schedule) executeTemplates(st *models.IncidentState, event *models.Even
 	if event.Status == models.StUnknown {
 		return nil
 	}
-	rt, errs := s.ExecuteAll(r, a, st, true)
+	// Error state has specific templates, so we should execute it separately
+	var (
+		errs []error
+		rt *models.RenderedTemplates
+	)
+	if event.Status == models.StError {
+		d := s.DataAccess.Errors()
+		errors, err := d.GetFullErrorHistoryByName(a.Name)
+		if err != nil {
+			slog.Errorf("error while get errors for rendering error templates for %s: %s", a.Name, err)
+			return nil
+		}
+		rt, errs = s.ExecuteErrorTemplate(r, a, st, errors)
+		if err != nil {
+			slog.Errorf("error while rendering error templates for %s: %s", a.Name, err)
+		}
+	} else {
+		rt, errs = s.ExecuteAll(r, a, st, true)
+	}
 	if len(errs) > 0 {
 		for _, err := range errs {
 			slog.Errorf("rendering templates for %s: %s", a.Name, err)
@@ -598,23 +618,47 @@ func (s *Schedule) CheckAlert(T miniprofiler.Timer, r *RunHistory, a *conf.Alert
 		return true
 	}
 	unevalCount, unknownCount := markDependenciesUnevaluated(r.Events, deps, a.Name)
+	errors := 0
 	if err != nil {
 		slog.Errorf("Error checking alert %s: %s", a.Name, err.Error())
-		removeUnknownEvents(r.Events, a.Name)
+		d := s.DataAccess.Errors()
+		count, e := d.GetFailingAlertCountsByName(a.Name, s.SystemConf.GetErrorsLimit())
+		if e != nil {
+			slog.Errorf("Error while get count of errors for alert %s: %s", a.Name, e.Error())
+		}
+		if a.MaxErrorsAllowed == 0 || count+1 > a.MaxErrorsAllowed {
+			setErrorEvents(r, a.Name)
+		} else {
+			slog.Infof("check alert %v failed, but we don't open incident because we already have %v errors and MaxErrorsAllowed is %v", a.Name, count+1, a.MaxErrorsAllowed)
+		}
 		s.markAlertError(a.Name, err)
+		errors++
 	} else {
+		incident, err := s.DataAccess.State().GetOpenIncident(models.NewAlertKey(a.Name, make(map[string]string)))
+		if err != nil {
+			slog.Error(err)
+		}
+		if incident == nil || incident.LastAbnormalStatus != models.StError {
+			s.DataAccess.Errors().ClearAlert(a.Name)
+		}
 		s.markAlertSuccessful(a.Name)
 	}
 	collect.Put("check.duration", opentsdb.TagSet{"name": a.Name}, time.Since(start).Seconds())
-	slog.Infof("check alert %v done (%s): %v crits, %v warns, %v unevaluated, %v unknown", a.Name, time.Since(start), len(crits), len(warns), unevalCount, unknownCount)
+	slog.Infof("check alert %v done (%s): %v crits, %v warns, %v unevaluated, %v unknown, %v errors", a.Name, time.Since(start), len(crits), len(warns), unevalCount, unknownCount, errors)
 	return false
 }
 
-func removeUnknownEvents(evs map[models.AlertKey]*models.Event, alert string) {
-	for k, v := range evs {
+func setErrorEvents(r *RunHistory, alert string) {
+	first := true
+	for k, v := range r.Events {
 		if v.Status == models.StUnknown && k.Name() == alert {
-			delete(evs, k)
+			v.Status = models.StError
+			first = false
 		}
+	}
+	if first {
+		ak := models.NewAlertKey(alert, make(map[string]string))
+		r.Events[ak] = &models.Event{Status: models.StError}
 	}
 }
 

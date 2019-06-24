@@ -24,6 +24,8 @@ func StatusColor(status models.Status) string {
 		return "danger"
 	case models.StUnknown:
 		return "#439FE0"
+	case models.StError:
+		return "#E043DA"
 	}
 	return ""
 }

@@ -249,6 +249,7 @@ const (
 	StWarning
 	StCritical
 	StUnknown
+	StError
 )
 
 func (s Status) String() string {
@@ -261,6 +262,8 @@ func (s Status) String() string {
 		return "critical"
 	case StUnknown:
 		return "unknown"
+	case StError:
+		return "error"
 	default:
 		return "none"
 	}
@@ -280,6 +283,8 @@ func (s *Status) UnmarshalJSON(b []byte) error {
 		*s = StCritical
 	case `"unknown"`:
 		*s = StUnknown
+	case `"error"`:
+		*s = StError
 	default:
 		*s = StNone
 	}
@@ -290,6 +295,7 @@ func (s Status) IsNormal() bool   { return s == StNormal }
 func (s Status) IsWarning() bool  { return s == StWarning }
 func (s Status) IsCritical() bool { return s == StCritical }
 func (s Status) IsUnknown() bool  { return s == StUnknown }
+func (s Status) IsError() bool    { return s == StError }
 
 type Action struct {
 	// These are available to users via the template language. Changes here

@@ -108,12 +108,16 @@ func (p *PreparedNotifications) Send(c SystemConfProvider) (errs []error) {
 
 // PrepareAlert does all of the work of selecting what content to send to which sources. It does not actually send any notifications,
 // but the returned object can be used to send them.
-func (n *Notification) PrepareAlert(rt *models.RenderedTemplates, ak string, attachments ...*models.Attachment) *PreparedNotifications {
+func (n *Notification) PrepareAlert(rt *models.RenderedTemplates, st *models.IncidentState, attachments ...*models.Attachment) *PreparedNotifications {
 	pn := &PreparedNotifications{Name: n.Name, Print: n.Print}
+
 	if len(n.Email) > 0 {
 		subject := rt.GetDefault(n.EmailSubjectTemplate, "emailSubject")
-		body := rt.GetDefault(n.BodyTemplate, "emailBody")
-		pn.Email = n.PrepEmail(subject, body, ak, attachments)
+		if st.CurrentStatus == models.StError {
+			pn.Email = n.PrepEmail(subject, rt.GetDefault(n.ErrorTemplateKeys.BodyTemplate, "emailBody"), string(st.AlertKey), attachments)
+		} else {
+			pn.Email = n.PrepEmail(subject, rt.GetDefault(n.BodyTemplate, "emailBody"), string(st.AlertKey), attachments)
+		}
 	}
 	if n.Post != nil || n.PostTemplate != "" {
 		url := ""
@@ -122,9 +126,15 @@ func (n *Notification) PrepareAlert(rt *models.RenderedTemplates, ak string, att
 		} else {
 			url = rt.Get(n.PostTemplate)
 		}
-		body := rt.GetDefault(n.BodyTemplate, "subject")
+		var body string
+		if st.CurrentStatus == models.StError {
+			body = rt.GetDefault(n.ErrorTemplateKeys.BodyTemplate, "subject")
+		} else {
+			body = rt.GetDefault(n.BodyTemplate, "subject")
+		}
+
 		details := &NotificationDetails{
-			Ak:          []string{ak},
+			Ak:          []string{string(st.AlertKey)},
 			NotifyName:  n.Name,
 			TemplateKey: n.BodyTemplate,
 			NotifyType:  1,
@@ -138,20 +148,22 @@ func (n *Notification) PrepareAlert(rt *models.RenderedTemplates, ak string, att
 		} else {
 			url = rt.Get(n.GetTemplate)
 		}
+
 		details := &NotificationDetails{
-			Ak:          []string{ak},
+			Ak:          []string{string(st.AlertKey)},
 			NotifyName:  n.Name,
 			TemplateKey: n.BodyTemplate,
 			NotifyType:  1,
 		}
+
 		pn.HTTP = append(pn.HTTP, n.PrepHttp("GET", url, "", details))
 	}
 	return pn
 }
 
 // NotifyAlert triggers Email/HTTP/Print actions for the Notification object. Called when an alert is first triggered, or on escalations.
-func (n *Notification) NotifyAlert(rt *models.RenderedTemplates, c SystemConfProvider, ak string, attachments ...*models.Attachment) {
-	go n.PrepareAlert(rt, ak, attachments...).Send(c)
+func (n *Notification) NotifyAlert(rt *models.RenderedTemplates, c SystemConfProvider, st *models.IncidentState, attachments ...*models.Attachment) {
+	go n.PrepareAlert(rt, st, attachments...).Send(c)
 }
 
 type PreparedHttp struct {

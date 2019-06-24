@@ -223,6 +223,12 @@ func (c *Conf) loadAlert(s *parse.SectionNode) {
 			a.IgnoreUnknown = true
 		case "unknownIsNormal":
 			a.UnknownsNormal = true
+		case "maxErrorsAllowed":
+			var err error
+			a.MaxErrorsAllowed, err = strconv.Atoi(v)
+			if err != nil {
+				c.error(err)
+			}
 		case "log":
 			a.Log = true
 		case "runEvery":
@@ -318,6 +324,7 @@ func (c *Conf) loadAlert(s *parse.SectionNode) {
 				checkSingleKey(tks.PostTemplate, ctx+" post url", alertTime)
 			}
 			checkTplKeys(&not.NotificationTemplateKeys, "alert", true)
+			checkTplKeys(&not.ErrorTemplateKeys, "error", true)
 			checkTplKeys(&not.UnknownTemplateKeys, "unknown", false)
 			checkTplKeys(&not.UnknownMultiTemplateKeys, "unknownMulti", false)
 			for at, ntk := range not.ActionTemplateKeys {
@@ -459,6 +466,9 @@ func (c *Conf) loadNotification(s *parse.SectionNode) {
 			} else if strings.HasPrefix(k, "unknown") {
 				keys = &n.UnknownTemplateKeys
 				keyType = strings.TrimPrefix(k, "unknown")
+			} else if strings.HasPrefix(k, "error") {
+				keys = &n.ErrorTemplateKeys
+				keyType = strings.TrimPrefix(k, "error")
 			} else {
 				c.errorf("unknown key %s", k)
 			}

@@ -160,6 +160,7 @@ func (s *Schedule) sendNotifications(silenced SilenceTester) {
 				}
 				continue
 			} else {
+				//TODO: Check error and set to pending again
 				s.notify(st.IncidentState, st.RenderedTemplates, n)
 			}
 			if n.Next != nil {
@@ -226,7 +227,7 @@ func (s *Schedule) sendUnknownNotifications() {
 // notify is a wrapper for the notifications Notify method that sets the EmailSubject and EmailBody for the rendered
 // template. It passes properties from the schedule that the Notification's Notify method requires.
 func (s *Schedule) notify(st *models.IncidentState, rt *models.RenderedTemplates, n *conf.Notification) {
-	n.NotifyAlert(rt, s.SystemConf, string(st.AlertKey), rt.Attachments...)
+	n.NotifyAlert(rt, s.SystemConf, st, rt.Attachments...)
 }
 
 // QueueNotification persists a notification to the datastore to be sent in the future. This happens when

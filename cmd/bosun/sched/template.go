@@ -29,9 +29,10 @@ import (
 
 type Context struct {
 	*models.IncidentState
-	Alert   *conf.Alert
-	IsEmail bool
-	Errors  []string
+	Alert        *conf.Alert
+	IsEmail      bool
+	RanderErrors []string
+	Errors       []*models.AlertError
 
 	schedule    *Schedule
 	runHistory  *RunHistory
@@ -271,10 +272,72 @@ func (s *Schedule) ExecuteAll(rh *RunHistory, a *conf.Alert, st *models.Incident
 	return rt, errs
 }
 
+var errorState_body = template.Must(template.New("body_error__state_template").Parse(`
+<p>There was a error while get data for alert {{.IncidentState.AlertKey}}. The following errors occurred:</p>
+
+<table>
+		<tr>
+			<th style="text-align:left">First Time</th>
+			<th style="text-align:left">Last Time</th>
+			<th style="text-align:left">Message</th>
+		</tr>
+	{{range .Errors}}
+		<tr>
+			<td style="text-align:left">{{.FirstTime}}</td>
+			<td style="text-align:left">{{.LastTime}}</td>
+			<td style="text-align:left">{{.Message}}</td>
+		</tr>
+{{end}}</table>
+
+<p>Use <a href="{{.Rule}}">this link</a> to the rule page to correct this.</p>
+<h2>Generic Alert Information</h2>
+<p>Status: {{.Last.Status}}</p>
+<p>Alert: {{.IncidentState.AlertKey}}</p>
+`))
+
+func (s *Schedule) ExecuteErrorTemplate(rh *RunHistory, a *conf.Alert, st *models.IncidentState, errors []*models.AlertError) (*models.RenderedTemplates, []error) {
+	rt := &models.RenderedTemplates{
+		Subject: fmt.Sprintf("Error while get data for alert %v", st.AlertKey),
+	}
+	var errs []error
+	var timer func()
+
+	e := func(err error, category string) {
+		if timer != nil {
+			timer()
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %s", category, err))
+		}
+	}
+
+	ctx := &Context{
+		IncidentState: st,
+		Alert:         a,
+		schedule:      s,
+		runHistory:    rh,
+		vars:          map[string]interface{}{},
+		Errors:        errors,
+	}
+
+	buf := new(bytes.Buffer)
+	errorState_body.Execute(buf, ctx)
+	rt.Body = buf.String()
+
+	rt.Custom = map[string]string{}
+	for k, v := range a.AlertTemplateKeys {
+		rendered, _, err := s.executeTpl(v, ctx)
+		e(err, k)
+		rt.Custom[k] = rendered
+	}
+
+	return rt, errs
+}
+
 var error_body = template.Must(template.New("body_error_template").Parse(`
 	<p>There was a runtime error processing alert {{.State.AlertKey}} using the {{.Alert.Template.Name}} template. The following errors occurred:</p>
 	<ul>
-	{{range .Errors}}
+	{{range .RanderErrors}}
 		<li>{{.}}</li>
 	{{end}}
 	</ul>
@@ -407,7 +470,7 @@ func (c *Context) LookupAll(table, key string, group interface{}) string {
 }
 
 func (c *Context) addError(e error) {
-	c.Errors = append(c.Errors, e.Error())
+	c.RanderErrors = append(c.RanderErrors, e.Error())
 }
 
 // LastError gets the most recent error string for the context's
@@ -415,7 +478,7 @@ func (c *Context) addError(e error) {
 // empty
 func (c *Context) LastError() string {
 	if len(c.Errors) > 0 {
-		return c.Errors[len(c.Errors)-1]
+		return c.RanderErrors[len(c.RanderErrors)-1]
 	}
 	return ""
 }

@@ -54,6 +54,7 @@ type SystemConfProvider interface {
 	GetDefaultRunEvery() int
 	GetAlertCheckDistribution() string
 	GetUnknownThreshold() int
+	GetErrorsLimit() int
 	GetMinGroupSize() int
 
 	GetShortURLKey() string
@@ -275,6 +276,8 @@ type Notification struct {
 	UnknownTemplateKeys      NotificationTemplateKeys
 	UnknownMultiTemplateKeys NotificationTemplateKeys
 
+	ErrorTemplateKeys      NotificationTemplateKeys
+
 	Print        bool
 	Next         *Notification
 	Timeout      time.Duration
@@ -443,6 +446,7 @@ type Alert struct {
 	UnjoinedOK       bool `json:",omitempty"`
 	Log              bool
 	RunEvery         int
+	MaxErrorsAllowed int
 	ReturnType       models.FuncType
 
 	TemplateName string   `json:"-"`

@@ -415,7 +415,7 @@ func (s *Schedule) MarshalGroups(T miniprofiler.Timer, filter string) (*StateGro
 		for tuple, states := range groups {
 			var grouped []*StateGroup
 			switch tuple.Status {
-			case models.StWarning, models.StCritical, models.StUnknown:
+			case models.StWarning, models.StCritical, models.StUnknown, models.StError:
 				var sets map[string]models.AlertKeys
 				T.Step(fmt.Sprintf("GroupSets (%d): %v", len(states), tuple), func(T miniprofiler.Timer) {
 					sets = states.GroupSets(s.SystemConf.GetMinGroupSize())
@@ -563,6 +563,7 @@ func (s *Schedule) ActionByIncidentId(user, message string, t models.ActionType,
 
 func (s *Schedule) action(user, message string, t models.ActionType, at *time.Time, st *models.IncidentState) (models.AlertKey, error) {
 	isUnknown := st.LastAbnormalStatus == models.StUnknown
+	isError := st.LastAbnormalStatus == models.StError
 	timestamp := utcNow()
 	action := models.Action{
 		Message: message,
@@ -625,25 +626,49 @@ func (s *Schedule) action(user, message string, t models.ActionType, at *time.Ti
 			st.Open = false
 			st.End = &timestamp
 		}
-		if err := s.DataAccess.Notifications().ClearNotifications(st.AlertKey); err != nil {
+		var err error
+		if (st.LastAbnormalStatus == models.StError && !st.IsActive()) {
+			err = s.DataAccess.Errors().ClearAlert(st.AlertKey.Name())
+		} else {
+			err = s.DataAccess.Notifications().ClearNotifications(st.AlertKey)
+		}
+		if err != nil {
 			return "", err
 		}
 	case models.ActionForceClose:
 		st.Open = false
 		st.End = &timestamp
-		if err := s.DataAccess.Notifications().ClearNotifications(st.AlertKey); err != nil {
+		var err error
+		if (st.LastAbnormalStatus == models.StError) {
+			err = s.DataAccess.Errors().ClearAlert(st.AlertKey.Name())
+		} else {
+			err = s.DataAccess.Notifications().ClearNotifications(st.AlertKey)
+		}
+		if err != nil {
 			return "", err
 		}
 	case models.ActionForget:
-		if !isUnknown {
+		if !isUnknown && !isError {
 			return "", fmt.Errorf("can only forget unknowns")
 		}
-		if err := s.DataAccess.Notifications().ClearNotifications(st.AlertKey); err != nil {
+		var err error
+		if (st.LastAbnormalStatus == models.StError) {
+			err = s.DataAccess.Errors().ClearAlert(st.AlertKey.Name())
+		} else {
+			err = s.DataAccess.Notifications().ClearNotifications(st.AlertKey)
+		}
+		if err != nil {
 			return "", err
 		}
 		fallthrough
 	case models.ActionPurge:
-		if err := s.DataAccess.Notifications().ClearNotifications(st.AlertKey); err != nil {
+		var err error
+		if (st.LastAbnormalStatus == models.StError) {
+			err = s.DataAccess.Errors().ClearAlert(st.AlertKey.Name())
+		} else {
+			err = s.DataAccess.Notifications().ClearNotifications(st.AlertKey)
+		}
+		if err != nil {
 			return "", err
 		}
 		return st.AlertKey, s.DataAccess.State().Forget(st.AlertKey)
