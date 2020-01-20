@@ -33,6 +33,8 @@ require (
 	github.com/facebookgo/httpcontrol v0.0.0-20150708234001-ccde4420e1fe
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20150612182917-8dac2c3c4870 // indirect
+	github.com/fortytw2/leaktest v1.3.0 // indirect
+	github.com/fsnotify/fsnotify v1.4.7
 	github.com/garyburd/redigo v0.0.0-20151219232044-836b6e58b335
 	github.com/glendc/gopher-json v0.0.0-20170414221815-dc4743023d0c // indirect
 	github.com/gocarina/gocsv v0.0.0-20190927101021-3ecffd272576 // indirect
@@ -46,6 +48,11 @@ require (
 	github.com/gorilla/css v0.0.0-20150317222238-a80e24ada269 // indirect
 	github.com/gorilla/mux v1.6.2
 	github.com/gorilla/securecookie v0.0.0-20161003051601-fa5329f91370 // indirect
+	github.com/hashicorp/logutils v1.0.0
+	github.com/hashicorp/memberlist v0.1.0
+	github.com/hashicorp/raft v1.1.1
+	github.com/hashicorp/raft-boltdb v0.0.0-20171010151810-6e5ba93211ea
+	github.com/hashicorp/serf v0.0.0-20161007004122-1d4fa605f6ff
 	github.com/influxdata/influxdb v1.6.3
 	github.com/influxdata/influxql v0.0.0-20180823200743-a7267bff5327
 	github.com/jinzhu/now v0.0.0-20151001141511-ce80572eb55a
@@ -72,7 +79,7 @@ require (
 	github.com/siddontang/goredis v0.0.0-20150324035039-760763f78400 // indirect
 	github.com/siddontang/ledisdb v0.0.0-20190202134119-8ceb77e66a92
 	github.com/siddontang/rdb v0.0.0-20150307021120-fc89ed2e418d // indirect
-	github.com/stretchr/testify v1.2.2
+	github.com/stretchr/testify v1.3.0
 	github.com/syndtr/goleveldb v0.0.0-20150819051622-1a9d62f03ea9 // indirect
 	github.com/tatsushid/go-fastping v0.0.0-20150818125950-06cac0fecdc2
 	github.com/twinj/uuid v0.0.0-20151029044442-89173bcdda19
@@ -85,6 +92,7 @@ require (
 	golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421
 	golang.org/x/sys v0.0.0-20190502145724-3ef323f4f1fd
 	google.golang.org/api v0.3.1
+	google.golang.org/appengine v1.0.1-0.20161115221414-ca59ef35f409 // indirect
 	gopkg.in/asn1-ber.v1 v1.0.0-20141119150059-9eae18c3681a // indirect
 	gopkg.in/fsnotify.v1 v1.4.7
 	gopkg.in/ldap.v1 v1.0.0-20150224155422-0041a4127039 // indirect
