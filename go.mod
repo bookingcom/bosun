@@ -33,7 +33,6 @@ require (
 	github.com/facebookgo/httpcontrol v0.0.0-20150708234001-ccde4420e1fe
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20150612182917-8dac2c3c4870 // indirect
-	github.com/fortytw2/leaktest v1.3.0 // indirect
 	github.com/fsnotify/fsnotify v1.4.7
 	github.com/garyburd/redigo v0.0.0-20151219232044-836b6e58b335
 	github.com/glendc/gopher-json v0.0.0-20170414221815-dc4743023d0c // indirect
@@ -90,9 +89,8 @@ require (
 	golang.org/x/image v0.0.0-20150916112557-baddd3465a05 // indirect
 	golang.org/x/net v0.0.0-20190620200207-3b0461eec859
 	golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421
-	golang.org/x/sys v0.0.0-20190502145724-3ef323f4f1fd
+	golang.org/x/sys v0.0.0-20190523142557-0e01d883c5c5
 	google.golang.org/api v0.3.1
-	google.golang.org/appengine v1.0.1-0.20161115221414-ca59ef35f409 // indirect
 	gopkg.in/asn1-ber.v1 v1.0.0-20141119150059-9eae18c3681a // indirect
 	gopkg.in/fsnotify.v1 v1.4.7
 	gopkg.in/ldap.v1 v1.0.0-20150224155422-0041a4127039 // indirect
