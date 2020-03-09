@@ -112,12 +112,13 @@ func testSched(t *testing.T, st *schedTest) (s *Schedule) {
 		s.DataAccess.State().TouchAlertKey(ak, time)
 	}
 	check(s, queryTime)
-	groups, err := s.MarshalGroups(new(miniprofiler.Profile), "")
+	groups, err := s.MarshalGroups(new(miniprofiler.Profile), "", false)
 	if err != nil {
 		t.Error(err)
 		return
 	}
 	var check func(g *StateGroup)
+
 	check = func(g *StateGroup) {
 		for _, c := range g.Children {
 			check(c)
