@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"bosun.org/cmd/bosun/conf"
+	promstat "bosun.org/collect/prometheus"
 	"bosun.org/models"
 	"bosun.org/slog"
 )
@@ -96,34 +97,38 @@ func (s *Schedule) CheckNotifications() time.Time {
 				s.QueueNotification(ak, n, t.Add(time.Minute))
 				continue
 			}
-			st, err := s.DataAccess.State().GetLatestIncident(ak)
-			if err != nil {
-				slog.Error(err)
-				continue
-			}
-			if st == nil {
-				continue
-			}
-			rt, err := s.DataAccess.State().GetRenderedTemplates(st.Id)
-			if err != nil {
-				slog.Error(err)
-				continue
-			}
-			if s.Notify(st, rt, n) {
-				_, err = s.DataAccess.State().UpdateIncidentState(st)
+			if s.RaftInstance.IsLeader() {
+				st, err := s.DataAccess.State().GetLatestIncident(ak)
 				if err != nil {
 					slog.Error(err)
 					continue
 				}
+				if st == nil {
+					continue
+				}
+				rt, err := s.DataAccess.State().GetRenderedTemplates(st.Id)
+				if err != nil {
+					slog.Error(err)
+					continue
+				}
+				if s.Notify(st, rt, n) {
+					_, err = s.DataAccess.State().UpdateIncidentState(st)
+					if err != nil {
+						slog.Error(err)
+						continue
+					}
+				}
 			}
 		}
 	}
-	s.sendNotifications(silenced)
-	s.pendingNotifications = nil
-	err = s.DataAccess.Notifications().ClearNotificationsBefore(latestTime)
-	if err != nil {
-		slog.Error("Error clearing notifications", err)
-		return utcNow().Add(time.Minute)
+	if s.RaftInstance.IsLeader() {
+		s.sendNotifications(silenced)
+		s.pendingNotifications = nil
+		err = s.DataAccess.Notifications().ClearNotificationsBefore(latestTime)
+		if err != nil {
+			slog.Error("Error clearing notifications", err)
+			return utcNow().Add(time.Minute)
+		}
 	}
 	timeout, err := s.DataAccess.Notifications().GetNextNotificationTime()
 	if err != nil {
@@ -167,6 +172,7 @@ func (s *Schedule) sendNotifications(silenced SilenceTester) {
 				}
 				continue
 			} else {
+				promstat.BosunNotificationsSent.Inc()
 				s.notify(st.IncidentState, st.RenderedTemplates, n)
 			}
 			if n.Next != nil {
