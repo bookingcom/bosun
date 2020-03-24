@@ -54,7 +54,7 @@ func (r *Raft) IsEnabled() bool {
 
 func (r *Raft) IsLeader() bool {
 	if r == nil {
-		return false
+		return true
 	}
 
 	return r.Instance.State() == raft.Leader
