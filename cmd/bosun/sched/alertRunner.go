@@ -6,6 +6,7 @@ import (
 
 	"bosun.org/cmd/bosun/cache"
 	"bosun.org/cmd/bosun/conf"
+	promstat "bosun.org/collect/prometheus"
 	"bosun.org/slog"
 )
 
@@ -60,11 +61,15 @@ func (s *Schedule) Run() error {
 			if (i+a.shift)%a.modulo != 0 {
 				continue
 			}
+			if !s.RaftInstance.IsLeader() {
+				continue
+			}
 			// Put on channel. If that fails, the alert is backed up pretty bad.
 			// Because channel is buffered size 1, it will continue as soon as it finishes.
 			// Master scheduler will never block here.
 			select {
 			case a.ch <- ctx:
+				promstat.BosunChecksExecuted.Inc()
 			default:
 			}
 		}

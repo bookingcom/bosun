@@ -11,6 +11,7 @@ import (
 
 	"bosun.org/annotate/backend"
 	"bosun.org/cmd/bosun/cache"
+	"bosun.org/cmd/bosun/cluster"
 	"bosun.org/cmd/bosun/conf"
 	"bosun.org/cmd/bosun/database"
 	"bosun.org/cmd/bosun/search"
@@ -57,7 +58,8 @@ type Schedule struct {
 	pendingUnknowns map[notificationGroupKey][]*models.IncidentState
 
 	lastLogTimes map[models.AlertKey]time.Time
-	LastCheck    time.Time
+	LastCheck,
+	StartTime time.Time
 
 	ctx *checkContext
 
@@ -71,9 +73,11 @@ type Schedule struct {
 	// things that take significant time should be cancelled (i.e. expression execution)
 	// whereas the runHistory is allowed to complete
 	checksRunning sync.WaitGroup
+
+	RaftInstance *cluster.Raft
 }
 
-func (s *Schedule) Init(name string, systemConf conf.SystemConfProvider, ruleConf conf.RuleConfProvider, dataAccess database.DataAccess, annotate backend.Backend, skipLast, quiet bool) error {
+func (s *Schedule) Init(name string, systemConf conf.SystemConfProvider, ruleConf conf.RuleConfProvider, dataAccess database.DataAccess, annotate backend.Backend, raftInstance *cluster.Raft, skipLast, quiet bool) error {
 	//initialize all variables and collections so they are ready to use.
 	//this will be called once at app start, and also every time the rule
 	//page runs, so be careful not to spawn long running processes that can't
@@ -84,9 +88,11 @@ func (s *Schedule) Init(name string, systemConf conf.SystemConfProvider, ruleCon
 	s.SystemConf = systemConf
 	s.RuleConf = ruleConf
 	s.annotate = annotate
+	s.RaftInstance = raftInstance
 	s.pendingUnknowns = make(map[notificationGroupKey][]*models.IncidentState)
 	s.lastLogTimes = make(map[models.AlertKey]time.Time)
 	s.LastCheck = utcNow()
+	s.StartTime = utcNow()
 	s.ctx = &checkContext{utcNow(), cache.New(name, 0)}
 	s.DataAccess = dataAccess
 	// Initialize the context and waitgroup used to gracefully shutdown bosun as well as reload
@@ -520,8 +526,8 @@ func marshalTime(t time.Time) string {
 var DefaultSched = &Schedule{}
 
 // Load loads a configuration into the default schedule.
-func Load(systemConf conf.SystemConfProvider, ruleConf conf.RuleConfProvider, dataAccess database.DataAccess, annotate backend.Backend, skipLast, quiet bool) error {
-	return DefaultSched.Init("alerts", systemConf, ruleConf, dataAccess, annotate, skipLast, quiet)
+func Load(systemConf conf.SystemConfProvider, ruleConf conf.RuleConfProvider, dataAccess database.DataAccess, annotate backend.Backend, raftInstance *cluster.Raft, skipLast, quiet bool) error {
+	return DefaultSched.Init("alerts", systemConf, ruleConf, dataAccess, annotate, raftInstance, skipLast, quiet)
 }
 
 // Run runs the default schedule.
