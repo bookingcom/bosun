@@ -19,6 +19,7 @@ import (
 	version "bosun.org/_version"
 	"bosun.org/annotate/backend"
 	"bosun.org/annotate/web"
+	"bosun.org/cmd/bosun/cluster"
 	"bosun.org/cmd/bosun/conf"
 	"bosun.org/cmd/bosun/conf/rule"
 	"bosun.org/cmd/bosun/database"
@@ -35,6 +36,8 @@ import (
 	"github.com/captncraig/easyauth"
 	"github.com/gorilla/mux"
 	"github.com/justinas/alice"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
@@ -47,9 +50,10 @@ var (
 	AnnotateBackend backend.Backend
 	reload          func() error
 
-	tokensEnabled bool
-	authEnabled   bool
-	startTime     time.Time
+	tokensEnabled  bool
+	clusterEnabled bool
+	authEnabled    bool
+	startTime      time.Time
 )
 
 const (
@@ -75,7 +79,16 @@ func init() {
 		"HTTP response codes from the backend server for request relayed through Bosun.")
 }
 
-func Listen(httpAddr, httpsAddr, certFile, keyFile string, devMode bool, tsdbHost string, reloadFunc func() error, authConfig *conf.AuthConf, st time.Time) error {
+func Listen(
+	httpAddr, httpsAddr, certFile, keyFile string,
+	devMode bool,
+	tsdbHost string,
+	reloadFunc func() error,
+	authConfig *conf.AuthConf,
+	st time.Time,
+	raft cluster.RaftClusterState,
+	prometheusPath string,
+) error {
 	startTime = st
 	if devMode {
 		slog.Infoln("using local web assets")
@@ -106,6 +119,8 @@ func Listen(httpAddr, httpsAddr, certFile, keyFile string, devMode bool, tsdbHos
 
 	baseChain := alice.New(miniProfilerMiddleware, endpointStatsMiddleware, gziphandler.GzipHandler)
 
+	clusterEnabled = raft.IsEnabled()
+
 	auth, tokens, err := buildAuth(authConfig)
 	if err != nil {
 		slog.Fatal(err)
@@ -120,8 +135,9 @@ func Listen(httpAddr, httpsAddr, certFile, keyFile string, devMode bool, tsdbHos
 	}
 
 	const (
-		GET  = http.MethodGet
-		POST = http.MethodPost
+		GET    = http.MethodGet
+		POST   = http.MethodPost
+		DELETE = http.MethodDelete
 	)
 
 	if tsdbHost != "" {
@@ -136,6 +152,12 @@ func Listen(httpAddr, httpsAddr, certFile, keyFile string, devMode bool, tsdbHos
 
 	handle("/api/config_test", JSON(ConfigTest), canViewConfig).Name("config_test").Methods(POST)
 	handle("/api/save_enabled", JSON(SaveEnabled), fullyOpen).Name("seve_enabled").Methods(GET)
+
+	if schedule.RaftInstance != nil {
+		handle("/api/cluster/status", JSON(ClusterStatus), canViewConfig).Name("cluster_status").Methods(GET)
+		handle("/api/cluster/recover_cluster", JSON(ClusterRecover), canManageCluster).Name("cluster_recover").Methods(POST)
+		handle("/api/cluster/change_master", JSON(ClusterChangeMasterTo), canManageCluster).Name("cluster_change_master_to").Methods(POST)
+	}
 
 	if schedule.SystemConf.ReloadEnabled() {
 		handle("/api/reload", JSON(Reload), canSaveConfig).Name("can_save").Methods(POST)
@@ -162,7 +184,7 @@ func Listen(httpAddr, httpsAddr, certFile, keyFile string, devMode bool, tsdbHos
 	handle("/api/metadata/get", JSON(GetMetadata), canViewDash).Name("meta_get").Methods(GET)
 	handle("/api/metadata/metrics", JSON(MetadataMetrics), canViewDash).Name("meta_metrics").Methods(GET)
 	handle("/api/metadata/put", JSON(PutMetadata), canPutData).Name("meta_put").Methods(POST)
-	handle("/api/metadata/delete", JSON(DeleteMetadata), canPutData).Name("meta_delete").Methods(http.MethodDelete)
+	handle("/api/metadata/delete", JSON(DeleteMetadata), canPutData).Name("meta_delete").Methods(DELETE)
 	handle("/api/metric", JSON(UniqueMetrics), canViewDash).Name("meta_uniqe_metrics").Methods(GET)
 	handle("/api/metric/{tagk}", JSON(MetricsByTagKey), canViewDash).Name("meta_metrics_by_tag").Methods(GET)
 	handle("/api/metric/{tagk}/{tagv}", JSON(MetricsByTagPair), canViewDash).Name("meta_metric_by_tag_pair").Methods(GET)
@@ -208,6 +230,17 @@ func Listen(httpAddr, httpsAddr, certFile, keyFile string, devMode bool, tsdbHos
 
 	//use default mux for pprof
 	router.PathPrefix("/debug/pprof").Handler(http.DefaultServeMux)
+
+	// Prometheus metrics
+	router.HandleFunc(prometheusPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raft.GetClusterStat()
+		promhttp.HandlerFor(
+			prometheus.DefaultGatherer,
+			promhttp.HandlerOpts{
+				EnableOpenMetrics: true,
+			},
+		).ServeHTTP(w, r)
+	}))
 
 	router.PathPrefix("/api").HandlerFunc(http.NotFound)
 	//MUST BE LAST!
@@ -322,11 +355,12 @@ type appSetings struct {
 	Version           opentsdb.Version
 	ExampleExpression string
 
-	AuthEnabled   bool
-	TokensEnabled bool
-	Username      string
-	Permissions   easyauth.Role
-	Roles         *roleMetadata
+	AuthEnabled    bool
+	TokensEnabled  bool
+	ClusterEnabled bool
+	Username       string
+	Permissions    easyauth.Role
+	Roles          *roleMetadata
 }
 
 type indexVariables struct {
@@ -360,6 +394,7 @@ func Index(t miniprofiler.Timer, w http.ResponseWriter, r *http.Request) (interf
 		Version:           openTSDBVersion,
 		AuthEnabled:       authEnabled,
 		TokensEnabled:     tokensEnabled,
+		ClusterEnabled:    clusterEnabled,
 		Roles:             roleDefs,
 		ExampleExpression: schedule.SystemConf.GetExampleExpression(),
 	}
