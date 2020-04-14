@@ -3,6 +3,7 @@ package main
 //go:generate go run ../../build/generate/generate.go
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -16,11 +17,14 @@ import (
 	"syscall"
 	"time"
 
-	version "bosun.org/_version"
 	"bosun.org/host"
+
+	version "bosun.org/_version"
 	"gopkg.in/fsnotify.v1"
 
 	"bosun.org/annotate/backend"
+	"bosun.org/cmd/bosun/cluster"
+	"bosun.org/cmd/bosun/cluster/fsm"
 	"bosun.org/cmd/bosun/conf"
 	"bosun.org/cmd/bosun/conf/rule"
 	"bosun.org/cmd/bosun/database"
@@ -29,12 +33,14 @@ import (
 	"bosun.org/cmd/bosun/sched"
 	"bosun.org/cmd/bosun/web"
 	"bosun.org/collect"
+	promstat "bosun.org/collect/prometheus"
 	"bosun.org/graphite"
 	"bosun.org/metadata"
 	"bosun.org/opentsdb"
 	"bosun.org/slog"
 	"bosun.org/util"
 	"github.com/facebookgo/httpcontrol"
+	"github.com/hashicorp/raft"
 	elastic6 "github.com/olivere/elastic"
 	elastic7 "github.com/olivere/elastic/v7"
 	elastic2 "gopkg.in/olivere/elastic.v3"
@@ -135,7 +141,6 @@ func main() {
 	}
 
 	initHostManager(systemConf.Hostname)
-
 	// Check if ES version is set by getting configs on start-up.
 	// Because the current APIs don't return error so calling slog.Fatalf
 	// inside these functions (for multiple-es support).
@@ -144,7 +149,7 @@ func main() {
 
 	sysProvider, err := systemConf.GetSystemConfProvider()
 	if err != nil {
-		slog.Fatal(err)
+		slog.Fatalf("Error while get system conf provider: %v", err)
 	}
 	ruleConf, err := rule.ParseFile(sysProvider.GetRuleFilePath(), systemConf.EnabledBackends(), systemConf.GetRuleVars())
 	if err != nil {
@@ -153,6 +158,9 @@ func main() {
 	if *flagTest {
 		os.Exit(0)
 	}
+
+	var raftInstance *cluster.Raft
+
 	var ruleProvider conf.RuleConfProvider = ruleConf
 
 	addrToSendTo := sysProvider.GetHTTPSListen()
@@ -171,7 +179,7 @@ func main() {
 
 	da, err := initDataAccess(sysProvider)
 	if err != nil {
-		slog.Fatal(err)
+		slog.Fatalf("Error while init database: %v", err)
 	}
 	if sysProvider.GetMaxRenderedTemplateAge() != 0 {
 		go da.State().CleanupOldRenderedTemplates(time.Hour * 24 * time.Duration(sysProvider.GetMaxRenderedTemplateAge()))
@@ -205,7 +213,143 @@ func main() {
 		}()
 		web.AnnotateBackend = annotateBackend
 	}
-	if err := sched.Load(sysProvider, ruleProvider, da, annotateBackend, *flagSkipLast, *flagQuiet); err != nil {
+
+	var cmdHook conf.SaveHook
+	if hookPath := sysProvider.GetCommandHookPath(); hookPath != "" {
+		cmdHook, err = conf.MakeSaveCommandHook(hookPath)
+		if err != nil {
+			slog.Fatal(err)
+		}
+		ruleProvider.SetSaveHook(cmdHook)
+	}
+	var (
+		reload         func() error
+		reloadSchedule func(*rule.Conf) error
+		setRuleConfig  func(*rule.Conf)
+	)
+	reloading := make(chan bool, 1) // a lock that we can give up acquiring
+
+	setRuleConfig = func(newConf *rule.Conf) {
+		// We are calling that function only for recover snapshots in fsm.Recovery()
+		// So it is often happens before run scheduler.
+		// In that way we should just change ruleProvider for future usage
+		// and son't restart a schedule
+
+		if systemConf.ClusterDontSyncRules() {
+			newConf, err = rule.ParseFile(sysProvider.GetRuleFilePath(), systemConf.EnabledBackends(), systemConf.GetRuleVars())
+			if err != nil {
+				slog.Fatalf("couldn't read rules: %v", err)
+				return
+			}
+		} else {
+			newConf.SetSaveHook(cmdHook)
+			newConf.SetReload(reload)
+			ruleProvider = newConf
+		}
+
+		if !sched.DefaultSched.StartTime.IsZero() {
+			// We should definetly restart schedule if it's running
+			reloadSchedule(newConf)
+		}
+	}
+
+	reloadSchedule = func(newConf *rule.Conf) error {
+		select {
+		case reloading <- true:
+			// Got lock
+		default:
+			return fmt.Errorf("not reloading, reload in progress")
+		}
+		defer func() {
+			<-reloading
+		}()
+		newConf.SetSaveHook(cmdHook)
+		newConf.SetReload(reload)
+		oldSched := sched.DefaultSched
+		oldSearch := oldSched.Search
+		sched.Close(true)
+		sched.Reset()
+		newSched := sched.DefaultSched
+		newSched.Search = oldSearch
+
+		slog.Infoln("schedule shutdown, loading new schedule")
+
+		// Load does not set the DataAccess or Search if it is already set
+		if err := sched.Load(sysProvider, newConf, da, annotateBackend, raftInstance, *flagSkipLast, *flagQuiet); err != nil {
+			slog.Fatal(err)
+		}
+		web.ResetSchedule() // Signal web to point to the new DefaultSchedule
+		go func() {
+			slog.Infoln("running new schedule", *flagNoChecks)
+			if !*flagNoChecks {
+				if err := sched.Run(); err != nil {
+					slog.Errorf("error while running new schedule: %v", err)
+				}
+			}
+		}()
+		slog.Infoln("config reload complete")
+
+		if systemConf.ClusterEnabled() && !systemConf.ClusterDontSyncRules() {
+			// make snapshot with changes
+			go func() {
+				slog.Infoln("Making snap")
+				snap := raftInstance.Instance.Snapshot()
+				if snap.Error() != nil {
+					promstat.ClusterSnapshotsErrors.Inc()
+					slog.Errorf("Error while create snapshot: %v", err)
+					return
+				}
+				slog.Infoln("snapshot was created")
+				if err := raftInstance.Snapshots.ReapSnapshots(); err != nil {
+					slog.Errorf("Error while reap old snapshots: %v", err)
+				}
+			}()
+		}
+		return nil
+	}
+
+	reload = func() error {
+		if !sysProvider.ClusterDontSyncRules() && raftInstance != nil && raftInstance.Instance.State() != raft.Leader {
+			return errors.New("Current node isn't a leader. Please send reload command to leader node")
+		}
+
+		newConf, err := rule.ParseFile(sysProvider.GetRuleFilePath(), sysProvider.EnabledBackends(), sysProvider.GetRuleVars())
+		if err != nil {
+			return err
+		}
+		if !sysProvider.ClusterDontSyncRules() && raftInstance != nil {
+			err = raftInstance.Apply(&fsm.ClusterCommand{
+				Cmd:  fsm.ACTION_APPLY_RULES,
+				Data: newConf.RawText,
+			}, 5*time.Minute)
+			if err != nil {
+				return err
+			}
+		} else {
+			return reloadSchedule(newConf)
+		}
+		return nil
+	}
+
+	err = promstat.Init()
+	if err != nil {
+		slog.Fatalf("Error while init prometheus metrics: %v", err)
+	}
+
+	// If cluster enable - init cluster
+	if systemConf.ClusterEnabled() {
+		var err error
+		raftInstance, err = cluster.StartCluster(systemConf, setRuleConfig, reloadSchedule)
+		if err != nil {
+			slog.Fatalf("couldn't init bosun cluster: %v", err)
+		}
+
+		promstat.ClusterState.Set(1)
+
+		go raftInstance.Watch()
+	}
+
+	if err := sched.Load(sysProvider, ruleProvider, da, annotateBackend, raftInstance, *flagSkipLast, *flagQuiet); err != nil {
 		slog.Fatal(err)
 	}
 	if err := metadata.InitF(false, func(k metadata.Metakey, v interface{}) error { return sched.DefaultSched.PutMetadata(k, v) }); err != nil {
@@ -244,61 +388,14 @@ func main() {
 			slog.Fatalf("InternetProxy error: %s", err)
 		}
 	}
-	var cmdHook conf.SaveHook
-	if hookPath := sysProvider.GetCommandHookPath(); hookPath != "" {
-		cmdHook, err = conf.MakeSaveCommandHook(hookPath)
-		if err != nil {
-			slog.Fatal(err)
-		}
-		ruleProvider.SetSaveHook(cmdHook)
-	}
-	var reload func() error
-	reloading := make(chan bool, 1) // a lock that we can give up acquiring
-	reload = func() error {
-		select {
-		case reloading <- true:
-			// Got lock
-		default:
-			return fmt.Errorf("not reloading, reload in progress")
-		}
-		defer func() {
-			<-reloading
-		}()
-		newConf, err := rule.ParseFile(sysProvider.GetRuleFilePath(), sysProvider.EnabledBackends(), sysProvider.GetRuleVars())
-		if err != nil {
-			return err
-		}
-		newConf.SetSaveHook(cmdHook)
-		newConf.SetReload(reload)
-		oldSched := sched.DefaultSched
-		oldSearch := oldSched.Search
-		sched.Close(true)
-		sched.Reset()
-		newSched := sched.DefaultSched
-		newSched.Search = oldSearch
-		slog.Infoln("schedule shutdown, loading new schedule")
-
-		// Load does not set the DataAccess or Search if it is already set
-		if err := sched.Load(sysProvider, newConf, da, annotateBackend, *flagSkipLast, *flagQuiet); err != nil {
-			slog.Fatal(err)
-		}
-		web.ResetSchedule() // Signal web to point to the new DefaultSchedule
-		go func() {
-			slog.Infoln("running new schedule")
-			if !*flagNoChecks {
-				sched.Run()
-			}
-		}()
-		slog.Infoln("config reload complete")
-		return nil
-	}
 
 	ruleProvider.SetReload(reload)
 
 	go func() {
 		slog.Fatal(web.Listen(sysProvider.GetHTTPListen(), sysProvider.GetHTTPSListen(),
 			sysProvider.GetTLSCertFile(), sysProvider.GetTLSKeyFile(), *flagDev,
-			sysProvider.GetTSDBHost(), reload, sysProvider.GetAuthConf(), startTime))
+			sysProvider.GetTSDBHost(), reload, sysProvider.GetAuthConf(), startTime,
+			raftInstance, sysProvider.GetPrometheusPath()))
 	}()
 	go func() {
 		if !*flagNoChecks {
