@@ -78,6 +78,8 @@ type SystemConfProvider interface {
 
 	GetMaxRenderedTemplateAge() int
 
+	GetProblemRunsToUnknown() time.Duration
+
 	GetExampleExpression() string
 
 	// Contexts
