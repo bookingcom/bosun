@@ -127,7 +127,7 @@ func initSched(sc conf.SystemConfProvider, c conf.RuleConfProvider, startTime ti
 	return s, err
 }
 
-func testSched(t *testing.T, st *schedTest, cluster cluster.Cluster) (s *Schedule) {
+func testSched(t *testing.T, sysConf *conf.SystemConf, st *schedTest, cluster cluster.Cluster) (s *Schedule) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req opentsdb.Request
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -164,8 +164,12 @@ func testSched(t *testing.T, st *schedTest, cluster cluster.Cluster) (s *Schedul
 	}
 
 	time.Sleep(time.Millisecond * 250)
-	sysConf := &conf.SystemConf{CheckFrequency: conf.Duration{Duration: time.Minute * 5}, DefaultRunEvery: 1, UnknownThreshold: 5, MinGroupSize: 5, OpenTSDBConf: conf.OpenTSDBConf{Host: u.Host, ResponseLimit: 1 << 20}}
-	s, _ = initSched(sysConf, c, time.Date(1900, 0, 0, 0, 0, 0, 0, time.UTC), cluster) //pretend we've been running for a while
+	if sysConf == nil {
+		sysConf = &conf.SystemConf{CheckFrequency: conf.Duration{Duration: time.Minute * 5}, DefaultRunEvery: 1, UnknownThreshold: 5, MinGroupSize: 5, OpenTSDBConf: conf.OpenTSDBConf{Host: u.Host, ResponseLimit: 1 << 20}}
+	} else {
+		sysConf.OpenTSDBConf.Host = u.Host
+	}
+	s, _ = initSched(sysConf, c, time.Date(1900, 0, 0, 0, 0, 0, 0, time.UTC), cluster)
 	for ak, time := range st.touched {
 		s.DataAccess.State().TouchAlertKey(ak, time)
 	}
@@ -213,7 +217,7 @@ var window5Min = `"9.467277e+08", "9.46728e+08"`
 
 func TestCrit(t *testing.T) {
 	defer setup()()
-	s := testSched(t, &schedTest{
+	s := testSched(t, nil, &schedTest{
 		conf: `alert a {
 			crit = avg(q("avg:m{a=b}", "5m", "")) > 0
 		}`,
@@ -237,7 +241,7 @@ func TestCrit(t *testing.T) {
 
 func TestClusterEnabledFollover_AlertRun(t *testing.T) {
 	defer setup()()
-	s := testSched(t, &schedTest{
+	s := testSched(t, nil, &schedTest{
 		conf: `alert a {
 			crit = avg(q("avg:m{a=b}", "5m", "")) > 0
 		}`,
@@ -261,7 +265,7 @@ func TestClusterEnabledFollover_AlertRun(t *testing.T) {
 
 func TestBandDisableUnjoined(t *testing.T) {
 	defer setup()()
-	testSched(t, &schedTest{
+	testSched(t, nil, &schedTest{
 		conf: `alert a {
 			$sum = "sum:m{a=*}"
 			$band = band($sum, "1m", "1h", 1)
@@ -288,7 +292,7 @@ func TestBandDisableUnjoined(t *testing.T) {
 
 func TestCount(t *testing.T) {
 	defer setup()()
-	testSched(t, &schedTest{
+	testSched(t, nil, &schedTest{
 		conf: `alert a {
 			crit = count("sum:m{a=*}", "5m", "") != 2
 		}`,
@@ -311,7 +315,7 @@ func TestCount(t *testing.T) {
 
 func TestUnknown(t *testing.T) {
 	defer setup()()
-	testSched(t, &schedTest{
+	testSched(t, nil, &schedTest{
 		conf: `alert a {
 			crit = avg(q("avg:m{a=*}", "5m", "")) > 0
 		}`,
@@ -328,9 +332,39 @@ func TestUnknown(t *testing.T) {
 	}, nil)
 }
 
+func TestDelayedUnknown(t *testing.T) {
+	defer setup()()
+	testSched(
+		t,
+		&conf.SystemConf{
+			CheckFrequency:       conf.Duration{Duration: time.Minute * 5},
+			DefaultRunEvery:      1,
+			UnknownThreshold:     5,
+			MinGroupSize:         5,
+			ProblemRunsToUnknown: 2,
+			OpenTSDBConf:         conf.OpenTSDBConf{ResponseLimit: 1 << 20},
+		},
+		&schedTest{
+			conf: `alert a {
+			crit = avg(q("avg:m{a=*}", "5m", "")) > 0
+		}`,
+			queries: map[string]opentsdb.ResponseSet{
+				`q("avg:m{a=*}", ` + window5Min + `)`: {},
+			},
+			state: map[schedState]bool{
+				{"a{a=d}", "unknown"}: true,
+			},
+			touched: map[models.AlertKey]time.Time{
+				"a{a=b}": queryTime.Add(-10 * time.Minute),
+				"a{a=c}": queryTime.Add(-12 * time.Minute),
+				"a{a=d}": queryTime.Add(-15 * time.Minute),
+			},
+		}, nil)
+}
+
 func TestUnknown_HalfFreq(t *testing.T) {
 	defer setup()()
-	testSched(t, &schedTest{
+	testSched(t, nil, &schedTest{
 		conf: `alert a {
 			crit = avg(q("avg:m{a=*}", "5m", "")) > 0
 			runEvery = 2
@@ -351,7 +385,7 @@ func TestUnknown_HalfFreq(t *testing.T) {
 func TestUnknown_WithError(t *testing.T) {
 	defer setup()()
 
-	s := testSched(t, &schedTest{
+	s := testSched(t, nil, &schedTest{
 		conf: `alert a {
 			crit = avg(q("avg:m{a=*}", "5m", "")) > 0
 		}`,
@@ -371,7 +405,7 @@ func TestUnknown_WithError(t *testing.T) {
 
 func TestRename(t *testing.T) {
 	defer setup()()
-	testSched(t, &schedTest{
+	testSched(t, nil, &schedTest{
 		conf: `
 		alert ping.host {
   
@@ -425,7 +459,7 @@ func TestRename(t *testing.T) {
 
 func TestUnknownsAreNormal(t *testing.T) {
 	defer setup()()
-	testSched(t, &schedTest{
+	testSched(t, nil, &schedTest{
 		conf: `alert a {
             unknownIsNormal = true
             crit = avg(q("avg:m{a=*}", "5m", "")) > 0
