@@ -6,8 +6,15 @@ import (
 
 	"bosun.org/cmd/bosun/cache"
 	"bosun.org/cmd/bosun/conf"
+	promstat "bosun.org/collect/prometheus"
 	"bosun.org/slog"
 )
+
+type alertCh struct {
+	ch     chan<- *checkContext
+	modulo int
+	shift  int // used to distribute alert runs
+}
 
 // Run should be called once (and only once) to start all schedule activity.
 func (s *Schedule) Run() error {
@@ -17,11 +24,7 @@ func (s *Schedule) Run() error {
 	s.run = true
 	s.nc = make(chan interface{}, 1)
 	go s.dispatchNotifications()
-	type alertCh struct {
-		ch     chan<- *checkContext
-		modulo int
-		shift  int // used to distribute alert runs
-	}
+
 	chs := []alertCh{}
 
 	// Every alert gets a small shift in time.
@@ -46,6 +49,11 @@ func (s *Schedule) Run() error {
 		// the shifts for a given period range 0..(period - 1)
 		circular_shifts[re] = (circular_shifts[re] + 1) % re
 	}
+	return s.RunLoop(chs)
+}
+
+func (s *Schedule) RunLoop(chs []alertCh) error {
+	isLeader := false
 	i := 0
 	for {
 		select {
@@ -56,15 +64,26 @@ func (s *Schedule) Run() error {
 		}
 		ctx := &checkContext{utcNow(), cache.New("alerts", 0)}
 		s.LastCheck = utcNow()
+
 		for _, a := range chs {
 			if (i+a.shift)%a.modulo != 0 {
 				continue
+			}
+			if s.RaftInstance != nil && !s.RaftInstance.IsLeader() {
+				isLeader = false
+				continue
+			} else if !isLeader {
+				// we are setting sheduler start time to now
+				// to prevent unknowns after failover
+				s.StartTime = utcNow()
+				isLeader = true
 			}
 			// Put on channel. If that fails, the alert is backed up pretty bad.
 			// Because channel is buffered size 1, it will continue as soon as it finishes.
 			// Master scheduler will never block here.
 			select {
 			case a.ch <- ctx:
+				promstat.BosunChecksExecuted.Inc()
 			default:
 			}
 		}

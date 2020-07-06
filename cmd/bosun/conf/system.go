@@ -53,6 +53,8 @@ type SystemConf struct {
 
 	DBConf DBConf
 
+	ClusterConf ClusterConf
+
 	SMTPConf SMTPConf
 
 	RuleVars map[string]string
@@ -67,6 +69,8 @@ type SystemConf struct {
 	PromConf         map[string]PromConf
 	CloudWatchConf   CloudWatchConf
 	AnnotateConf     AnnotateConf
+
+	PrometheusPath string
 
 	AuthConf *AuthConf
 
@@ -242,6 +246,20 @@ type DBConf struct {
 
 	LedisDir      string
 	LedisBindAddr string
+}
+
+// ClusterConf stores information about nodes in cluster
+type ClusterConf struct {
+	MetadataStorePath  string
+	RPCListen          string
+	Members            []string
+	MembersFile        string
+	HeartbeatTimeout   int64
+	ElectionTimeout    int64
+	LeaderLeaseTimeout int64
+	SnapshotInterval   int64
+	NodeID             string
+	DontSyncRules      bool
 }
 
 // SMTPConf contains information for the mail server for which bosun will
@@ -513,6 +531,76 @@ func (sc *SystemConf) GetAuthConf() *AuthConf {
 	return sc.AuthConf
 }
 
+// ClusterEnabled returns information about clustering
+func (sc *SystemConf) ClusterEnabled() bool {
+	return len(sc.ClusterConf.RPCListen) > 0
+}
+
+// ClusterElectionTimeout returns timeout for election new leader.
+// By default value is 1000 ms
+func (sc *SystemConf) ClusterElectionTimeout() time.Duration {
+	if sc.ClusterConf.ElectionTimeout <= 0 {
+		return 1000 * time.Millisecond
+	}
+	return time.Duration(sc.ClusterConf.ElectionTimeout) * time.Millisecond
+}
+
+func (sc *SystemConf) GetClusterNodeID() string {
+	return sc.ClusterConf.NodeID
+}
+
+// ClusterSnapshotInterval returns interval for make raft db snapshots.
+// By default value is 10 minutes.
+func (sc *SystemConf) ClusterSnapshotInterval() time.Duration {
+	if sc.ClusterConf.SnapshotInterval <= 0 {
+		return 24 * time.Hour
+	}
+	return time.Duration(sc.ClusterConf.SnapshotInterval) * time.Second
+}
+
+// ClusterHeartbeatTimeout returns timeout for heartbeat new leader.
+// By default value is 1000 ms
+func (sc *SystemConf) ClusterHeartbeatTimeout() time.Duration {
+	if sc.ClusterConf.HeartbeatTimeout <= 0 {
+		return 1000 * time.Millisecond
+	}
+	return time.Duration(sc.ClusterConf.HeartbeatTimeout) * time.Millisecond
+}
+
+// ClusterDontSyncRules returns if rules shouldn't be synced within cluster
+// If it is true cluster don't manage rules config at all. In that case you should take care
+// about keeping rules config in synced state by yourself
+func (sc *SystemConf) ClusterDontSyncRules() bool {
+	return sc.ClusterConf.DontSyncRules
+}
+
+// ClusterLeaderLeaseTimeout returns timeout for lease old leader.
+// By default value is 500 ms
+func (sc *SystemConf) ClusterLeaderLeaseTimeout() time.Duration {
+	if sc.ClusterConf.LeaderLeaseTimeout <= 0 {
+		return 500 * time.Millisecond
+	}
+	return time.Duration(sc.ClusterConf.LeaderLeaseTimeout) * time.Millisecond
+}
+
+// GetClusterBindAddress returns the address thet SERF should listen on.
+// RAFT will listen port SERF + 1
+func (sc *SystemConf) GetClusterBindAddress() string {
+	return sc.ClusterConf.RPCListen
+}
+
+func (sc *SystemConf) GetClusterMetadataStorePath() string {
+	return sc.ClusterConf.MetadataStorePath
+}
+
+func (sc *SystemConf) GetClusterMembers() []string {
+	return sc.ClusterConf.Members
+}
+
+func (sc *SystemConf) GetClusterMembersFile() string {
+	return sc.ClusterConf.MembersFile
+}
+
 // GetRuleVars user defined variables that will be available to the rule configuration
 // under "$sys.". This is so values with secrets can be defined in the system configuration
 func (sc *SystemConf) GetRuleVars() map[string]string {
@@ -593,6 +681,14 @@ func (sc *SystemConf) ReloadEnabled() bool {
 // GetCommandHookPath returns the path of a command that should be run on every save
 func (sc *SystemConf) GetCommandHookPath() string {
 	return sc.CommandHookPath
+}
+
+// GetPrometheusPath returns url path for expose prometheus metrics
+func (sc *SystemConf) GetPrometheusPath() string {
+	if sc.PrometheusPath == "" {
+		return "/metrics"
+	}
+	return sc.PrometheusPath
 }
 
 // GetRuleFilePath returns the path to the file containing contains rules

@@ -18,6 +18,7 @@ require (
 	github.com/alicebob/gopher-json v0.0.0-20180125190556-5a6b3ba71ee6 // indirect
 	github.com/alicebob/miniredis v2.5.0+incompatible // indirect
 	github.com/andybalholm/cascadia v0.0.0-20150730174459-3ad29d1ad1c4 // indirect
+	github.com/armon/go-metrics v0.3.3
 	github.com/aws/aws-sdk-go v1.31.12
 	github.com/aymerick/douceur v0.2.1-0.20150827151352-7176f1467381
 	github.com/bosun-monitor/statusio v0.0.0-20160516160816-ab1583139762
@@ -47,6 +48,14 @@ require (
 	github.com/gorilla/css v0.0.0-20150317222238-a80e24ada269 // indirect
 	github.com/gorilla/mux v0.0.0-20160920230813-757bef944d0f
 	github.com/gorilla/securecookie v0.0.0-20161003051601-fa5329f91370 // indirect
+	github.com/hashicorp/go-hclog v0.12.1
+	github.com/hashicorp/go-immutable-radix v1.1.0 // indirect
+	github.com/hashicorp/golang-lru v0.5.4 // indirect
+	github.com/hashicorp/logutils v1.0.0
+	github.com/hashicorp/memberlist v0.1.0
+	github.com/hashicorp/raft v1.1.2
+	github.com/hashicorp/raft-boltdb v0.0.0-20171010151810-6e5ba93211ea
+	github.com/hashicorp/serf v0.0.0-20161007004122-1d4fa605f6ff
 	github.com/influxdata/influxdb v1.6.3
 	github.com/influxdata/influxql v0.0.0-20180823200743-a7267bff5327
 	github.com/jinzhu/now v0.0.0-20151001141511-ce80572eb55a
@@ -66,8 +75,8 @@ require (
 	github.com/pelletier/go-toml v1.6.0 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.0
-	github.com/prometheus/client_golang v0.9.3-0.20190106165022-d2ead2588477
-	github.com/prometheus/common v0.1.0
+	github.com/prometheus/client_golang v1.4.0
+	github.com/prometheus/common v0.9.1
 	github.com/prometheus/prometheus v1.8.2-0.20190115164134-b639fe140c1f
 	github.com/ryanuber/go-glob v0.0.0-20160226084822-572520ed46db
 	github.com/siddontang/go v0.0.0-20150505004501-b151716326d7 // indirect
@@ -86,11 +95,9 @@ require (
 	golang.org/x/image v0.0.0-20150916112557-baddd3465a05 // indirect
 	golang.org/x/net v0.0.0-20200226121028-0de0cce0169b
 	golang.org/x/oauth2 v0.0.0-20180821212333-d2e6202438be
-	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e // indirect
-	golang.org/x/sys v0.0.0-20190502145724-3ef323f4f1fd
+	golang.org/x/sys v0.0.0-20200122134326-e047566fdf82
 	google.golang.org/api v0.0.0-20180506000402-20530fd5d65a
 	gopkg.in/asn1-ber.v1 v1.0.0-20141119150059-9eae18c3681a // indirect
-	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/fsnotify.v1 v1.4.7
 	gopkg.in/ldap.v1 v1.0.0-20150224155422-0041a4127039 // indirect
 	gopkg.in/mgo.v2 v2.0.0-20190816093944-a6b53ec6cb22 // indirect
