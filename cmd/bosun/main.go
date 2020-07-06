@@ -49,7 +49,7 @@ func (t *bosunHttpTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Add("User-Agent", t.UserAgent)
 	}
-	req.Header.Add("X-Bosun-Server", util.GetHostManager().GetHostName())
+	req.Header.Add("X-Bosun-Server", util.GetHostManager().GetRealHostName())
 	return t.RoundTripper.RoundTrip(req)
 }
 
