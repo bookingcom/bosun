@@ -56,6 +56,8 @@ type SystemConfProvider interface {
 	GetUnknownThreshold() int
 	GetMinGroupSize() int
 
+	ClusterDontSyncRules() bool
+
 	GetShortURLKey() string
 	GetInternetProxy() string
 
@@ -63,6 +65,8 @@ type SystemConfProvider interface {
 	SaveEnabled() bool
 	ReloadEnabled() bool
 	GetCommandHookPath() string
+
+	GetPrometheusPath() string
 
 	SetTSDBHost(tsdbHost string)
 	GetTSDBHost() string
