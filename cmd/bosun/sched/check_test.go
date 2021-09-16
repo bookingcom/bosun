@@ -458,6 +458,9 @@ Loop:
 	}
 }
 
+func TestCheckNotifyDelayedUnknown(t *testing.T) {
+}
+
 // TestCheckNotifyUnknownDefault tests the default unknownTemplate.
 func TestCheckNotifyUnknownDefault(t *testing.T) {
 	defer setup()()
