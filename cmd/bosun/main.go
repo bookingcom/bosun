@@ -410,6 +410,11 @@ func main() {
 		base := filepath.Join("web", "static", "js")
 		watch(base, "*.ts", web.RunTsc)
 	}
+
+	if systemConf.GetScheduledClearWebCache() {
+		go web.ClearWebCache(systemConf.GetScheduledClearWebCacheDuration())
+	}
+
 	select {}
 }
 
